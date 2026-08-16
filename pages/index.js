@@ -1,8 +1,12 @@
 import dynamic from 'next/dynamic'
 
-// ssr: false → não renderiza no servidor (necessário por usar localStorage)
+const AuthGate = dynamic(() => import('../components/AuthGate'), { ssr: false })
 const App = dynamic(() => import('../components/App'), { ssr: false })
 
 export default function Home() {
-  return <App />
+  return (
+    <AuthGate>
+      <App />
+    </AuthGate>
+  )
 }
