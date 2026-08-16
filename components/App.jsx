@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect } from "react";
+import { sGet, sSet } from "../lib/storage";
 import { PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine } from "recharts";
 
 /* ─── Logo ─────────────────────────────────────── */
@@ -35,13 +36,7 @@ const fmtDoc = v => {
   }
 };
 
-/* ─── Storage ────────────────────────────────────── */
-const sGet = async k => {
-  try{ if(typeof window==="undefined")return null; const r=localStorage.getItem(k); return r?JSON.parse(r):null; }catch{ return null; }
-};
-const sSet = async(k,v) => {
-  try{ if(typeof window==="undefined")return; localStorage.setItem(k,JSON.stringify(v)); }catch{}
-};
+/* ─── Storage / Supabase ─────────────────────────── */
 
 /* ─── Tax Calculations ───────────────────────────── */
 function calcDAS(rbt12, rec) {
