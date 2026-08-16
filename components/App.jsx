@@ -10,7 +10,13 @@ const MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","A
 const TIPOS_DESP = ["DAS","Pró-Labore","Distribuição de Lucros","INSS","Taxa","Imposto","Conta","Contabilidade","Escritório Virtual","Material","Outros"];
 const TIPOS_REC  = ["Recebimento de Clientes","Estorno"];
 const ESPS       = ["Endodontia","Ortodontia"];
-const SAL_MIN    = 1518.00;
+// Parâmetros oficiais vigentes para 2026.
+// Fonte: INSS/Portaria Interministerial MPS/MF nº 13/2026.
+const SAL_MIN     = 1621.00;
+const INSS_TETO   = 8475.55;
+const INSS_ALIQ   = 0.11;
+const FATOR_R_MIN = 0.28;
+const APP_VERSION = 3;
 
 /* ─── Theme ──────────────────────────────────────── */
 const C = {
@@ -21,19 +27,45 @@ const C = {
 const iSt = { width:"100%", background:"white", border:"1px solid #E0D8CE", borderRadius:12, padding:"12px 14px", fontSize:15, fontFamily:"inherit", color:"#1A1A1A", outline:"none", boxSizing:"border-box" };
 
 /* ─── Helpers ────────────────────────────────────── */
-const fmtBRL  = v => new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(v||0);
-const parseBRL= v => parseFloat(String(v).replace(/\./g,"").replace(",","."))||0;
-const fmtIn   = v => { const d=String(v).replace(/\D/g,""); if(!d)return""; return(parseInt(d,10)/100).toFixed(2).replace(".",",").replace(/\B(?=(\d{3})+(?!\d))/g,"."); };
+const round2 = v => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round((n + Number.EPSILON) * 100) / 100 : 0;
+};
+const num = v => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+const fmtBRL = v => new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL",minimumFractionDigits:2,maximumFractionDigits:2}).format(num(v));
+const parseBRL = v => {
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  const raw = String(v ?? "").trim();
+  if (!raw) return 0;
+  const normalized = raw.replace(/\s/g,"").replace(/R\$?/gi,"").replace(/\./g,"").replace(",",".");
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+};
+const fmtIn = v => {
+  const d=String(v ?? "").replace(/\D/g,"");
+  if(!d)return"";
+  return(round2(parseInt(d,10)/100)).toFixed(2).replace(".",",").replace(/\B(?=(\d{3})+(?!\d))/g,".");
+};
 const fmtDoc = v => {
-  const d=v.replace(/\D/g,"");
+  const d=String(v ?? "").replace(/\D/g,"");
   if(d.length<=11){
-    // CPF: 000.000.000-00
     return d.slice(0,11).replace(/(\d{3})(\d)/,"$1.$2").replace(/(\d{3})(\d)/,"$1.$2").replace(/(\d{3})(\d{1,2})$/,"$1-$2");
   } else {
-    // CNPJ: 00.000.000/0000-00
     return d.slice(0,14).replace(/^(\d{2})(\d)/,"$1.$2").replace(/^(\d{2})\.(\d{3})(\d)/,"$1.$2.$3").replace(/\.(\d{3})(\d)/,".$1/$2").replace(/(\d{4})(\d)/,"$1-$2");
   }
 };
+const dateLocal = value => {
+  if (!value) return null;
+  const [y,m,d] = String(value).slice(0,10).split("-").map(Number);
+  if(!y || !m || !d) return null;
+  return new Date(y,m-1,d,12,0,0,0);
+};
+const monthKey = (year, month) => `${year}-${String(month+1).padStart(2,"0")}`;
+const txMonth = t => dateLocal(t?.data);
+const isValidMoney = v => Number.isFinite(Number(v)) && Number(v) >= 0;
 
 /* ─── Storage ────────────────────────────────────── */
 const sGet = async k => {
@@ -44,66 +76,129 @@ const sSet = async(k,v) => {
 };
 
 /* ─── Tax Calculations ───────────────────────────── */
-function calcDAS(rbt12, rec) {
-  if(rbt12<=0||rec<=0) return {valor:rec*0.06, aliq:0.06};
-  const fx=[
-    {lim:180000,   nom:0.060, ded:0},
-    {lim:360000,   nom:0.112, ded:9360},
-    {lim:720000,   nom:0.135, ded:17640},
-    {lim:1800000,  nom:0.160, ded:35640},
-    {lim:3600000,  nom:0.210, ded:125640},
-    {lim:4800000,  nom:0.330, ded:557640},
-  ];
-  const f=fx.find(x=>rbt12<=x.lim)||fx[fx.length-1];
-  const aliq=(rbt12*f.nom-f.ded)/rbt12;
-  return {valor:rec*aliq, aliq};
+const DAS_TABLES = {
+  III: [
+    {lim:180000, nom:0.060, ded:0},
+    {lim:360000, nom:0.112, ded:9360},
+    {lim:720000, nom:0.135, ded:17640},
+    {lim:1800000, nom:0.160, ded:35640},
+    {lim:3600000, nom:0.210, ded:125640},
+    {lim:4800000, nom:0.330, ded:648000},
+  ],
+  V: [
+    {lim:180000, nom:0.155, ded:0},
+    {lim:360000, nom:0.180, ded:4500},
+    {lim:720000, nom:0.195, ded:9900},
+    {lim:1800000, nom:0.205, ded:17100},
+    {lim:3600000, nom:0.230, ded:62100},
+    {lim:4800000, nom:0.305, ded:540000},
+  ]
+};
+
+function calcDAS(rbt12, rec, anexo="III") {
+  const receita = Math.max(0, num(rec));
+  const rbt = Math.max(0, num(rbt12));
+  if(receita<=0) return {valor:0, aliq:0, nominal:0, ded:0, anexo, faixa:0};
+  const table = DAS_TABLES[anexo] || DAS_TABLES.III;
+  if(rbt<=0) {
+    const f=table[0];
+    return {valor:round2(receita*f.nom), aliq:f.nom, nominal:f.nom, ded:f.ded, anexo, faixa:1};
+  }
+  const f=table.find(x=>rbt<=x.lim)||table[table.length-1];
+  const aliq=Math.max(0,(rbt*f.nom-f.ded)/rbt);
+  return {valor:round2(receita*aliq), aliq, nominal:f.nom, ded:f.ded, anexo, faixa:table.indexOf(f)+1};
+}
+
+function calcINSS(proLabore) {
+  // Pró-labore de contribuinte individual: 11%, limitado ao teto.
+  // O aplicativo não aumenta artificialmente o pró-labore para atingir o piso;
+  // quando abaixo do salário mínimo, sinaliza a necessidade de conferência/complementação.
+  const base = Math.min(Math.max(num(proLabore),0), INSS_TETO);
+  return round2(base * INSS_ALIQ);
 }
 
 function calcIRRF(proLabore, inss) {
-  const base = Math.max(0, proLabore - inss);
-  // Tabela IRRF 2026 (conforme contabilidade)
+  const bruto = Math.max(0,num(proLabore));
+  const base = Math.max(0, bruto - Math.max(0,num(inss)));
   const fx = [
-    { ate: 2428.80, aliq: 0,     ded: 0      },
+    { ate: 2428.80, aliq: 0,     ded: 0 },
     { ate: 2826.65, aliq: 0.075, ded: 182.16 },
     { ate: 3751.05, aliq: 0.15,  ded: 394.16 },
     { ate: 4664.68, aliq: 0.225, ded: 675.49 },
-    { ate: Infinity,aliq: 0.275, ded: 908.73  },
+    { ate: Infinity,aliq: 0.275, ded: 908.73 }
   ];
-  const f = fx.find(x => base <= x.ate) || fx[fx.length-1];
-  const normal = Math.max(0, base * f.aliq - f.ded);
-  // Lei 15.270/25: isento até R$ 5.000; redutor entre R$ 5.000 e R$ 7.350
-  if (proLabore <= 5000) return 0;
-  if (proLabore <= 7350) {
-    const redutor = Math.max(0, 978.62 - 0.133145 * proLabore);
-    return Math.max(0, normal - redutor);
-  }
-  return normal;
+  const f=fx.find(x=>base<=x.ate)||fx[fx.length-1];
+  const normal=Math.max(0,base*f.aliq-f.ded);
+  let reducao=0;
+  if(bruto<=5000) reducao=normal;
+  else if(bruto<=7350) reducao=Math.min(normal,Math.max(0,978.62-(0.133145*bruto)));
+  return round2(Math.max(0,normal-reducao));
 }
 
 function computePL(month, year, txs, plMap) {
   let totalRec=0, totalPLprev=0;
   for(let i=0;i<12;i++){
     let m=month-i, y=year;
-    if(m<0){m+=12;y--;}
-    const rec=txs.filter(t=>{const d=new Date(t.data+"T12:00:00");return t.tipo==="receita"&&d.getMonth()===m&&d.getFullYear()===y;}).reduce((s,t)=>s+t.valor,0);
+    while(m<0){m+=12;y--;}
+    const rec=txs.filter(t=>{
+      const d=txMonth(t);
+      return d&&t.tipo==="receita"&&d.getMonth()===m&&d.getFullYear()===y;
+    }).reduce((s,t)=>s+num(t.valor),0);
     totalRec+=rec;
-    if(i>0){ const k=`${y}-${String(m+1).padStart(2,"0")}`; totalPLprev+=plMap[k]||0; }
+    if(i>0) totalPLprev+=num(plMap[monthKey(y,m)]);
   }
-  return Math.max(SAL_MIN, totalRec*0.28-totalPLprev);
+  if(totalRec<=0) return 0;
+  return round2(Math.max(SAL_MIN,totalRec*FATOR_R_MIN-totalPLprev));
+}
+
+function getRbt12Info(month, year, txs) {
+  let total=0;
+  for(let i=0;i<12;i++){
+    let m=month-i,y=year;
+    while(m<0){m+=12;y--;}
+    total+=txs.filter(t=>{
+      const d=txMonth(t);
+      return d&&t.tipo==="receita"&&d.getMonth()===m&&d.getFullYear()===y;
+    }).reduce((a,t)=>a+num(t.valor),0);
+  }
+  const first=txs.filter(t=>t.tipo==="receita"&&txMonth(t)).sort((a,b)=>String(a.data).localeCompare(String(b.data)))[0];
+  let mesesAtividade=0;
+  let anualizado=total;
+  if(first){
+    const fd=txMonth(first);
+    const currentIndex=year*12+month;
+    const firstIndex=fd.getFullYear()*12+fd.getMonth();
+    mesesAtividade=Math.max(1,Math.min(12,currentIndex-firstIndex+1));
+    if(mesesAtividade<12) anualizado=round2((total/mesesAtividade)*12);
+  }
+  return {rbt12:round2(total),rbt12P:round2(anualizado),mesesR:mesesAtividade};
+}
+
+function calcFatorR(month, year, txs, plMap) {
+  let receita=0, folha=0;
+  for(let i=0;i<12;i++){
+    let m=month-i,y=year;
+    while(m<0){m+=12;y--;}
+    receita += txs.filter(t=>{
+      const d=txMonth(t);
+      return d&&t.tipo==="receita"&&d.getMonth()===m&&d.getFullYear()===y;
+    }).reduce((a,t)=>a+num(t.valor),0);
+    folha += num(plMap[monthKey(y,m)]);
+  }
+  return { receita:round2(receita), folha:round2(folha), fator:receita>0?folha/receita:0 };
 }
 
 async function cascadePL(txs, existing, manual={}) {
-  // Coleta todos os meses com receita em ordem cronológica
   const keys=new Set();
-  txs.filter(t=>t.tipo==="receita").forEach(t=>{ const d=new Date(t.data+"T12:00:00"); keys.add(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`); });
-  let map={};
-  // Recomputa SEMPRE em ordem — mas usa override manual quando disponível
+  txs.filter(t=>t.tipo==="receita"&&txMonth(t)).forEach(t=>{
+    const d=txMonth(t); keys.add(monthKey(d.getFullYear(),d.getMonth()));
+  });
+  const map={};
   for(const key of [...keys].sort()){
-    if(manual[key]!=null){
-      map[key]=manual[key]; // valor digitado manualmente pelo usuário
-    } else {
+    if(manual[key]!=null && isValidMoney(manual[key])) map[key]=round2(manual[key]);
+    else {
       const [y,ms]=key.split("-");
-      map[key]=computePL(parseInt(ms,10)-1,parseInt(y,10),txs,map);
+      map[key]=computePL(Number(ms)-1,Number(y),txs,map);
     }
   }
   await sSet("pj_pl",map);
@@ -162,35 +257,38 @@ export default function App() {
   useEffect(()=>{ const v=irrfMap[plKey]; setIrrfIn(v?fmtIn(String(Math.round(v*100))):""); },[plKey,JSON.stringify(irrfMap)]);
 
   /* ── Derived ── */
-  const monthTxs=txs.filter(t=>{ const d=new Date(t.data+"T12:00:00"); return d.getMonth()===month&&d.getFullYear()===year; });
-  const receitas=monthTxs.filter(t=>t.tipo==="receita").reduce((s,t)=>s+t.valor,0);
-  const despesas=monthTxs.filter(t=>t.tipo==="despesa").reduce((s,t)=>s+t.valor,0);
-  const resultado=receitas-despesas;
+  const monthTxs=txs.filter(t=>{
+    const d=txMonth(t);
+    return d&&d.getMonth()===month&&d.getFullYear()===year;
+  });
+  const receitas=round2(monthTxs.filter(t=>t.tipo==="receita").reduce((s,t)=>s+num(t.valor),0));
+  const despesas=round2(monthTxs.filter(t=>t.tipo==="despesa").reduce((s,t)=>s+num(t.valor),0));
+  const resultado=round2(receitas-despesas);
 
-  const {rbt12,rbt12P,mesesR}=(()=>{
-    let tot=0,m=0;
-    for(let i=0;i<12;i++){
-      let mm=month-i,yy=year; if(mm<0){mm+=12;yy--;}
-      const r=txs.filter(t=>{const d=new Date(t.data+"T12:00:00");return t.tipo==="receita"&&d.getMonth()===mm&&d.getFullYear()===yy;}).reduce((s,t)=>s+t.valor,0);
-      if(r>0){tot+=r;m++;}
-    }
-    return{rbt12:tot,rbt12P:m>0&&m<12?(tot/m)*12:tot,mesesR:m};
-  })();
-
-  const das=calcDAS(rbt12P||rbt12,receitas);
-  const DAS=das.valor, aliq=das.aliq;
+  const {rbt12,rbt12P,mesesR}=getRbt12Info(month,year,txs);
   const PLauto=computePL(month,year,txs,plMap);
   const PLsalvo=plMap[plKey]||0;
   const PLef=PLsalvo>0?PLsalvo:PLauto;
-  const INSS=PLef*0.11;
-  const CTB=ctbMap[plKey]||0;
+  const fatorInfo=calcFatorR(month,year,txs,plMap);
+  const fatorR=fatorInfo.fator;
+  const anexo=fatorR>=FATOR_R_MIN?"III":"V";
+  const das=calcDAS(rbt12P||rbt12,receitas,anexo);
+  const DAS=das.valor, aliq=das.aliq;
+  const INSS=calcINSS(PLef);
+  const CTB=num(ctbMap[plKey]);
   const IRRFauto=calcIRRF(PLef,INSS);
-  const IRRFsalvo=irrfMap[plKey]||0;
-  const IRRFef=IRRFsalvo>0?IRRFsalvo:IRRFauto;
-  const totalObrig=DAS+INSS+CTB+IRRFef;
-  const saldo=txs.reduce((a,t)=>{const d=new Date(t.data+"T12:00:00");if(d.getFullYear()<year||(d.getFullYear()===year&&d.getMonth()<=month))return a+(t.tipo==="receita"?t.valor:-t.valor);return a;},0);
+  const IRRFsalvo=irrfMap[plKey];
+  const IRRFef=IRRFsalvo!=null?num(IRRFsalvo):IRRFauto;
+  const totalObrig=round2(DAS+INSS+CTB+IRRFef);
+  const saldo=round2(txs.reduce((a,t)=>{
+    const d=txMonth(t);
+    if(!d) return a;
+    if(d.getFullYear()<year||(d.getFullYear()===year&&d.getMonth()<=month))
+      return a+(t.tipo==="receita"?num(t.valor):-num(t.valor));
+    return a;
+  },0));
 
-  const allYears=[...new Set([year,...txs.map(t=>new Date(t.data+"T12:00:00").getFullYear())])].sort((a,b)=>b-a);
+  const allYears=[...new Set([year,...txs.map(t=>txMonth(t)?.getFullYear()).filter(Boolean)])].sort((a,b)=>b-a);
 
   /* ── Savers ── */
   const saveTxs=async d=>{
@@ -219,7 +317,9 @@ export default function App() {
       return;
     }
     const v=parseBRL(raw);
-    if(v<SAL_MIN) notify("Abaixo do salário mínimo","warn");
+    if(!Number.isFinite(v) || v<0){ notify("Pró-labore inválido.","err"); return; }
+    if(v>INSS_TETO) notify(`Pró-labore acima do teto do INSS (${fmtBRL(INSS_TETO)}). O INSS será limitado ao teto.`,"warn");
+    else if(v>0 && v<SAL_MIN) notify("Abaixo do salário mínimo: confira a necessidade de complementação previdenciária.","warn");
     // Salva como override manual
     const newManual={...plManual,[plKey]:v};
     setPlManual(newManual); await sSet("pj_plm",newManual);
@@ -265,34 +365,64 @@ export default function App() {
 
   /* ── Export/Import ── */
   const doExport=()=>{
-    const d={txs,favs,plMap,ctbMap,at:new Date().toISOString()};
-    setExportTxt(JSON.stringify(d)); setStab("export"); setShowSettings(true);
+    const d={
+      app:"contabilidade-pj",
+      version:APP_VERSION,
+      exportedAt:new Date().toISOString(),
+      txs:Array.isArray(txs)?txs:[],
+      favs:Array.isArray(favs)?favs:[],
+      plMap:plMap&&typeof plMap==="object"?plMap:{},
+      plManual:plManual&&typeof plManual==="object"?plManual:{},
+      ctbMap:ctbMap&&typeof ctbMap==="object"?ctbMap:{},
+      irrfMap:irrfMap&&typeof irrfMap==="object"?irrfMap:{}
+    };
+    setExportTxt(JSON.stringify(d,null,2)); setStab("export"); setShowSettings(true);
   };
+
   const doImport=async()=>{
     try{
       const d=JSON.parse(importTxt);
-      // Suporta formato antigo (transactions/favorites/proLaboreMap/contabMap)
-      // e formato novo (txs/favs/plMap/ctbMap)
-      const txData  = d.txs || d.transactions;
-      const favData = d.favs || d.favorites;
-      const plData  = d.plMap || d.proLaboreMap;
-      const ctbData = d.ctbMap || d.contabMap;
-      if(favData) await saveFavs(favData);
-      if(ctbData) await saveCtb(ctbData);
-      const manualData = d.plManual || {};
-      const irrfData = d.irrfMap || {};
-      setIrrfMap(irrfData); await sSet("pj_irrf",irrfData);
-      setPlManual(manualData); await sSet("pj_plm",manualData);
-      if(txData){ await sSet("pj_tx2",txData); setTxs(txData); const up=await cascadePL(txData,{},manualData); setPlMap(up); }
-      setImportTxt(""); setShowSettings(false); notify("Importado com sucesso!");
-    }catch(e){notify("Texto inválido. Cole o backup completo.","err");}
+      if(!d || typeof d!=="object" || Array.isArray(d)) throw new Error("Formato inválido");
+
+      const txData=d.txs??d.transactions;
+      const favData=d.favs??d.favorites;
+      const plData=d.plMap??d.proLaboreMap;
+      const manualData=d.plManual&&typeof d.plManual==="object"&&!Array.isArray(d.plManual)?d.plManual:{};
+      const ctbData=d.ctbMap??d.contabMap;
+      const irrfData=d.irrfMap&&typeof d.irrfMap==="object"&&!Array.isArray(d.irrfMap)?d.irrfMap:{};
+
+      if(txData!==undefined&&!Array.isArray(txData)) throw new Error("Lançamentos inválidos");
+      if(favData!==undefined&&!Array.isArray(favData)) throw new Error("Favoritos inválidos");
+      if(plData!==undefined&&(typeof plData!=="object"||Array.isArray(plData))) throw new Error("Pró-labore inválido");
+      if(ctbData!==undefined&&(typeof ctbData!=="object"||Array.isArray(ctbData))) throw new Error("Contabilidade inválida");
+
+      // Valida lançamentos antes de tocar no estado atual.
+      if(Array.isArray(txData)){
+        for(const t of txData){
+          if(!t||!t.id||!["receita","despesa"].includes(t.tipo)||!String(t.data||"").match(/^\d{4}-\d{2}-\d{2}$/)||!isValidMoney(t.valor)||num(t.valor)<=0)
+            throw new Error("Existe lançamento inválido no backup");
+        }
+      }
+
+      if(Array.isArray(favData)) await saveFavs(favData);
+      if(ctbData!==undefined) await saveCtb(ctbData);
+      await sSet("pj_irrf",irrfData); setIrrfMap(irrfData);
+      await sSet("pj_plm",manualData); setPlManual(manualData);
+
+      if(Array.isArray(txData)){
+        await sSet("pj_tx2",txData); setTxs(txData);
+        const up=await cascadePL(txData,plData||{},manualData);
+        setPlMap(up);
+      } else if(plData!==undefined){
+        await sSet("pj_pl",plData); setPlMap(plData);
+      }
+
+      setImportTxt(""); setShowSettings(false); notify("Backup importado com sucesso!");
+    }catch(e){
+      notify(e?.message||"Backup inválido. Nenhum dado foi alterado.","err");
+    }
   };
 
-  const favsAtt=formTipo==="receita"?favs.filter(f=>f.tipo==="receita"):favs.filter(f=>f.tipo==="despesa");
-  const fmtV=v=>hideVal?"R$ ···":fmtBRL(v);
-  const nav=[{id:"dashboard",label:"Início",icon:"◎"},{id:"lancamentos",label:"Lançamentos",icon:"≡"},{id:"favoritos",label:"Favoritos",icon:"♡"},{id:"estatistica",label:"Estatística",icon:"◑"},{id:"anual",label:"Anual",icon:"▦"}];
-
-  /* ══ RENDER ══════════════════════════════════════════════ */
   return (
     <div style={{fontFamily:"Georgia,serif",background:C.bg,minHeight:"100vh",maxWidth:430,margin:"0 auto",position:"relative"}}>
 
@@ -515,7 +645,7 @@ export default function App() {
                 <p style={{margin:"8px 0 0",fontSize:14}}>Nenhuma nota nesta categoria</p>
               </div>
               :cfg.lista.map(tx=>{
-                const d=new Date(tx.data+"T12:00:00");
+                const d=txMonth(tx);
                 const isEmit=tx.notaGerada;
                 return(
                   <div key={tx.id} onClick={()=>{setNotaModal(null);openEdit(tx);}}
@@ -553,7 +683,7 @@ export default function App() {
             <CloseBtn onClick={()=>setDrillModal(null)}/>
           </div>
           {drillModal.items.map(tx=>{
-            const d=new Date(tx.data+"T12:00:00"); const isR=tx.tipo==="receita";
+            const d=txMonth(tx); const isR=tx.tipo==="receita";
             return (
               <div key={tx.id} style={{background:"white",borderRadius:14,padding:"13px 15px",marginBottom:10,boxShadow:"0 1px 8px rgba(0,0,0,0.05)",borderLeft:`3px solid ${isR?C.navyMid:C.red}`}}>
                 <div style={{display:"flex",justifyContent:"space-between"}}>
@@ -617,7 +747,7 @@ export default function App() {
 }
 
 /* ─── Tab Components ─────────────────────────────── */
-function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,MONTHS,DAS,aliq,rbt12,rbt12P,mesesR,PLauto,PLef,plIn,setPlIn,commitPL,INSS,CTB,ctbIn,setCtbIn,commitCtb,IRRFauto,IRRFef,irrfIn,setIrrfIn,commitIrrf,totalObrig,C,fmtBRL,fmtIn,setNotaModal,openEdit}){
+function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,MONTHS,DAS,aliq,rbt12,rbt12P,mesesR,fatorR,anexo,PLauto,PLef,plIn,setPlIn,commitPL,INSS,CTB,ctbIn,setCtbIn,commitCtb,IRRFauto,IRRFef,irrfIn,setIrrfIn,commitIrrf,totalObrig,C,fmtBRL,fmtIn,setNotaModal,openEdit}){
   const recMes=monthTxs.filter(t=>t.tipo==="receita");
   const emit=recMes.filter(t=>t.notaGerada), pend=recMes.filter(t=>!t.notaGerada);
   return(<>
@@ -642,9 +772,17 @@ function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,MONTHS,D
     </Card>
     <Card style={{marginBottom:12}}>
       <SmLabel style={{marginBottom:16}}>Impostos &amp; Obrigações</SmLabel>
+      <div style={{background:fatorR>=0.28?C.navyLight:"#FFF5F5",borderRadius:10,padding:"9px 12px",marginBottom:12,border:`1px solid ${fatorR>=0.28?"#B8C9DD":"#F0C0BA"}`}}>
+        <p style={{margin:0,fontSize:11,color:fatorR>=0.28?C.navyMid:C.red,lineHeight:1.5}}>
+          📐 Fator R estimado: <b>{(fatorR*100).toFixed(2)}%</b> · Anexo <b>{anexo}</b> · limite <b>28%</b>
+        </p>
+        <p style={{margin:"2px 0 0",fontSize:10,color:C.muted}}>
+          Cálculo baseado no pró-labore registrado no aplicativo; confirme a folha/encargos com a contabilidade.
+        </p>
+      </div>
       <div style={{paddingBottom:14}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
-          <div><p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>DAS — Simples Nacional</p><p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>Alíquota efetiva: {(aliq*100).toFixed(2)}% (Anexo III)</p></div>
+          <div><p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>DAS — Simples Nacional</p><p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>Alíquota efetiva: {(aliq*100).toFixed(2)}% · Anexo {anexo}</p></div>
           <p style={{margin:0,fontSize:16,fontWeight:"bold",color:"#E67E22"}}>{fmtBRL(DAS)}</p>
         </div>
         <div style={{background:"#FFFBF0",borderRadius:10,padding:"8px 12px",border:"1px solid #F0E0A0"}}>
@@ -659,13 +797,13 @@ function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,MONTHS,D
         </div>
         <MoneyIn value={plIn||fmtIn(String(Math.round(PLef*100)))} onChange={setPlIn} onBlur={commitPL} placeholder={fmtIn(String(Math.round(PLauto*100)))}/>
         <div style={{background:C.navyLight,borderRadius:10,padding:"8px 12px",marginTop:8}}>
-          <p style={{margin:0,fontSize:11,color:C.navyMid,lineHeight:1.5}}>🔒 Fórmula: max(R$ 1.518, 28% × receitas acumuladas − PLs anteriores) · Deixe em branco para usar o valor automático</p>
+          <p style={{margin:0,fontSize:11,color:C.navyMid,lineHeight:1.5}}>🔒 Fórmula automática: max(R$ 1.621, 28% × receitas acumuladas − PLs anteriores) · Deixe em branco para usar o valor automático</p>
         </div>
       </div>
       <Div/>
       <div style={{paddingBottom:14}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-          <div><p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>INSS do Sócio 🔒</p><p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>11% sobre {fmtBRL(PLef)} · automático</p></div>
+          <div><p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>INSS do Sócio 🔒</p><p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>11% sobre a base do pró-labore · teto {fmtBRL(INSS_TETO)}</p></div>
           <p style={{margin:0,fontSize:16,fontWeight:"bold",color:"#8E44AD"}}>{fmtBRL(INSS)}</p>
         </div>
       </div>
@@ -682,7 +820,7 @@ function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,MONTHS,D
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
           <div>
             <p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>IRRF</p>
-            <p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>Tabela progressiva 2025 · base: pró-labore − INSS</p>
+            <p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>Tabela progressiva 2026 · base: pró-labore − INSS</p>
           </div>
           <p style={{margin:0,fontSize:14,fontWeight:"bold",color:"#C0392B"}}>{fmtBRL(IRRFef)}</p>
         </div>
@@ -884,8 +1022,8 @@ function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF}){
     const key=`${year}-${String(i+1).padStart(2,"0")}`;
     const receita=txs.filter(t=>{ const d=new Date(t.data+"T12:00:00"); return t.tipo==="receita"&&d.getMonth()===i&&d.getFullYear()===year; }).reduce((s,t)=>s+t.valor,0);
     const pl=plMap[key]||0;
-    const inss=pl*0.11;
-    const irrf=irrfMap[key]||calcIRRF(pl,inss);
+    const inss=calcINSS(pl);
+    const irrf=irrfMap[key]!=null?num(irrfMap[key]):calcIRRF(pl,inss);
     return {mes,receita,pl,inss,irrf};
   }).filter(d=>d.receita>0||d.pl>0);
 
@@ -946,7 +1084,7 @@ function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF}){
 
 function TxCard({tx,onEdit,onDelete,C,fmtBRL,MONTHS}){
   const [open,setOpen]=useState(false);
-  const d=new Date(tx.data+"T12:00:00"); const isR=tx.tipo==="receita";
+  const d=txMonth(tx); const isR=tx.tipo==="receita";
   return(
     <div style={{background:"white",borderRadius:16,padding:"13px 15px",marginBottom:10,boxShadow:"0 1px 8px rgba(0,0,0,0.05)",borderLeft:`3px solid ${isR?C.navyMid:C.red}`}}>
       <div style={{display:"flex",alignItems:"center",gap:11}}>
