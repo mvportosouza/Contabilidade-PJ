@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine } from "recharts";
 
 /* ─── Logo ─────────────────────────────────────── */
@@ -16,7 +16,8 @@ const SAL_MIN     = 1621.00;
 const INSS_TETO   = 8475.55;
 const INSS_ALIQ   = 0.11;
 const FATOR_R_MIN = 0.28;
-const APP_VERSION = 3;
+const APP_VERSION = 4;
+const BACKUP_MAX_BYTES = 2 * 1024 * 1024;
 
 /* ─── Theme ──────────────────────────────────────── */
 const C = {
@@ -66,14 +67,25 @@ const dateLocal = value => {
 const monthKey = (year, month) => `${year}-${String(month+1).padStart(2,"0")}`;
 const txMonth = t => dateLocal(t?.data);
 const isValidMoney = v => Number.isFinite(Number(v)) && Number(v) >= 0;
+const isValidDate = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v||"")) && (()=>{ const [y,m,d]=String(v).split("-").map(Number); const dt=new Date(y,m-1,d); return dt.getFullYear()===y&&dt.getMonth()===m-1&&dt.getDate()===d; })();
+const digits = v => String(v??"").replace(/\D/g,"");
+const isValidCPF = value => { const d=digits(value); if(d.length!==11||/^([0-9])\1{10}$/.test(d)) return false; let sum=0; for(let i=0;i<9;i++) sum+=+d[i]*(10-i); let r=(sum*10)%11; if(r===10)r=0; if(r!==+d[9])return false; sum=0; for(let i=0;i<10;i++)sum+=+d[i]*(11-i); r=(sum*10)%11; if(r===10)r=0; return r===+d[10]; };
+const isValidCNPJ = value => { const d=digits(value); if(d.length!==14||/^([0-9])\1{13}$/.test(d)) return false; const calc=(n)=>{let pos=n-5,sum=0; for(let i=0;i<n;i++){sum+=+d[i]*pos--;if(pos<2)pos=9;} const r=sum%11; return r<2?0:11-r;}; return calc(12)===+d[12]&&calc(13)===+d[13]; };
+const isValidDoc = value => { const d=digits(value); return !d || (d.length===11?isValidCPF(d):d.length===14?isValidCNPJ(d):false); };
+const isValidEmail = value => !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim());
+const isValidPhone = value => { const d=digits(value); return !d || (d.length===10||d.length===11); };
+const signedValue = t => { const v=Math.max(0,num(t?.valor)); if(t?.tipo==="despesa") return -v; if(t?.categoria==="Estorno") return -v; return v; };
+const isRevenueTx = t => t?.tipo==="receita";
+const makeId = () => { try{ if(typeof crypto!=="undefined" && crypto.randomUUID) return crypto.randomUUID(); }catch{} return `${Date.now()}-${Math.random().toString(36).slice(2,10)}`; };
 
 /* ─── Storage ────────────────────────────────────── */
 const sGet = async k => {
-  try{ if(typeof window==="undefined")return null; const r=localStorage.getItem(k); return r?JSON.parse(r):null; }catch{ return null; }
+  try{ if(typeof window==="undefined" || !window.localStorage)return null; const r=window.localStorage.getItem(k); return r?JSON.parse(r):null; }catch{ return null; }
 };
 const sSet = async(k,v) => {
-  try{ if(typeof window==="undefined")return; localStorage.setItem(k,JSON.stringify(v)); }catch{}
+  try{ if(typeof window==="undefined" || !window.localStorage)return false; window.localStorage.setItem(k,JSON.stringify(v)); return true; }catch{ return false; }
 };
+const storageAvailable = () => { try{ const k="__pj_storage_test__"; window.localStorage.setItem(k,"1"); window.localStorage.removeItem(k); return true; }catch{return false;} };
 
 /* ─── Tax Calculations ───────────────────────────── */
 const DAS_TABLES = {
@@ -143,7 +155,7 @@ function computePL(month, year, txs, plMap) {
     const rec=txs.filter(t=>{
       const d=txMonth(t);
       return d&&t.tipo==="receita"&&d.getMonth()===m&&d.getFullYear()===y;
-    }).reduce((s,t)=>s+num(t.valor),0);
+    }).reduce((s,t)=>s+signedValue(t),0);
     totalRec+=rec;
     if(i>0) totalPLprev+=num(plMap[monthKey(y,m)]);
   }
@@ -159,9 +171,9 @@ function getRbt12Info(month, year, txs) {
     total+=txs.filter(t=>{
       const d=txMonth(t);
       return d&&t.tipo==="receita"&&d.getMonth()===m&&d.getFullYear()===y;
-    }).reduce((a,t)=>a+num(t.valor),0);
+    }).reduce((a,t)=>a+Math.max(0,signedValue(t)),0);
   }
-  const first=txs.filter(t=>t.tipo==="receita"&&txMonth(t)).sort((a,b)=>String(a.data).localeCompare(String(b.data)))[0];
+  const first=txs.filter(t=>t.tipo==="receita"&&txMonth(t)&&signedValue(t)>0).sort((a,b)=>String(a.data).localeCompare(String(b.data)))[0];
   let mesesAtividade=0;
   let anualizado=total;
   if(first){
@@ -182,7 +194,7 @@ function calcFatorR(month, year, txs, plMap) {
     receita += txs.filter(t=>{
       const d=txMonth(t);
       return d&&t.tipo==="receita"&&d.getMonth()===m&&d.getFullYear()===y;
-    }).reduce((a,t)=>a+num(t.valor),0);
+    }).reduce((a,t)=>a+Math.max(0,signedValue(t)),0);
     folha += num(plMap[monthKey(y,m)]);
   }
   return { receita:round2(receita), folha:round2(folha), fator:receita>0?folha/receita:0 };
@@ -232,43 +244,55 @@ export default function App() {
   const [stab,setStab]=useState("export");
   const [hideVal,setHideVal]=useState(false);
   const [toast,setToast]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [storageWarning,setStorageWarning]=useState(false);
+  const toastTimer=useRef(null);
 
   const blank={valor:"",data:now.toISOString().split("T")[0],nome:"",cnpj:"",telefone:"",cep:"",endereco:"",email:"",especialidade:"",dente:"",categoria:"",descricao:"",notaGerada:false,numeroNota:"",saveAsFav:false};
   const [form,setForm]=useState(blank);
 
   useEffect(()=>{
     (async()=>{
-      const t=await sGet("pj_tx2")||[];
-      const fv=await sGet("pj_favs2")||[];
-      const pl=await sGet("pj_pl")||{};
-      const pm=await sGet("pj_plm")||{};
-      const ct=await sGet("pj_ctb")||{};
-      const irrf=await sGet("pj_irrf")||{};
-      setFavs(fv); setCtbMap(ct); setIrrfMap(irrf); setPlManual(pm);
-      const updated=await cascadePL(t,pl,pm);
-      setTxs(t); setPlMap(updated);
+      try{
+        if(!storageAvailable()) setStorageWarning(true);
+        const t=(await sGet("pj_tx2")||[]).filter(Boolean);
+        const fv=(await sGet("pj_favs2")||[]).filter(Boolean);
+        const pl=await sGet("pj_pl")||{};
+        const pm=await sGet("pj_plm")||{};
+        const ct=await sGet("pj_ctb")||{};
+        const irrf=await sGet("pj_irrf")||{};
+        const savedHide=await sGet("pj_hideVal");
+        setFavs(fv); setCtbMap(ct); setIrrfMap(irrf); setPlManual(pm);
+        if(typeof savedHide==="boolean") setHideVal(savedHide);
+        const updated=await cascadePL(t,pl,pm);
+        setTxs(t); setPlMap(updated);
+      }catch(e){ setStorageWarning(true); }
+      finally{ setLoading(false); }
     })();
+    return()=>{ if(toastTimer.current)clearTimeout(toastTimer.current); };
   },[]);
 
   const plKey=`${year}-${String(month+1).padStart(2,"0")}`;
 
-  useEffect(()=>{ const v=plMap[plKey]; setPlIn(v?fmtIn(String(Math.round(v*100))):""); },[plKey,JSON.stringify(plMap)]);
+  useEffect(()=>{ const has=Object.prototype.hasOwnProperty.call(plManual,plKey); const v=has?num(plManual[plKey]):null; setPlIn(has?fmtIn(String(Math.round(v*100))):""); },[plKey,JSON.stringify(plManual)]);
   useEffect(()=>{ const v=ctbMap[plKey]; setCtbIn(v?fmtIn(String(Math.round(v*100))):""); },[plKey,JSON.stringify(ctbMap)]);
   useEffect(()=>{ const v=irrfMap[plKey]; setIrrfIn(v?fmtIn(String(Math.round(v*100))):""); },[plKey,JSON.stringify(irrfMap)]);
+  useEffect(()=>{ sSet("pj_hideVal",hideVal); },[hideVal]);
 
   /* ── Derived ── */
   const monthTxs=txs.filter(t=>{
     const d=txMonth(t);
     return d&&d.getMonth()===month&&d.getFullYear()===year;
   });
-  const receitas=round2(monthTxs.filter(t=>t.tipo==="receita").reduce((s,t)=>s+num(t.valor),0));
-  const despesas=round2(monthTxs.filter(t=>t.tipo==="despesa").reduce((s,t)=>s+num(t.valor),0));
+  const receitas=round2(monthTxs.filter(isRevenueTx).reduce((s,t)=>s+Math.max(0,signedValue(t)),0));
+  const despesas=round2(monthTxs.filter(t=>t.tipo==="despesa").reduce((s,t)=>s+Math.max(0,-signedValue(t)),0));
   const resultado=round2(receitas-despesas);
 
   const {rbt12,rbt12P,mesesR}=getRbt12Info(month,year,txs);
   const PLauto=computePL(month,year,txs,plMap);
-  const PLsalvo=plMap[plKey]||0;
-  const PLef=PLsalvo>0?PLsalvo:PLauto;
+  const hasPLManual=Object.prototype.hasOwnProperty.call(plManual,plKey);
+  const PLsalvo=hasPLManual?num(plManual[plKey]):null;
+  const PLef=hasPLManual?PLsalvo:PLauto;
   const fatorInfo=calcFatorR(month,year,txs,plMap);
   const fatorR=fatorInfo.fator;
   const anexo=fatorR>=FATOR_R_MIN?"III":"V";
@@ -284,7 +308,7 @@ export default function App() {
     const d=txMonth(t);
     if(!d) return a;
     if(d.getFullYear()<year||(d.getFullYear()===year&&d.getMonth()<=month))
-      return a+(t.tipo==="receita"?num(t.valor):-num(t.valor));
+      return a+signedValue(t);
     return a;
   },0));
 
@@ -292,19 +316,22 @@ export default function App() {
 
   /* ── Savers ── */
   const saveTxs=async d=>{
-    setTxs(d); await sSet("pj_tx2",d);
+    const ok=await sSet("pj_tx2",d);
+    if(!ok){setStorageWarning(true);notify("Não foi possível salvar os lançamentos neste navegador.","err");return false;}
+    setTxs(d);
     const fresh=await sGet("pj_pl")||{};
     const freshM=await sGet("pj_plm")||{};
     const up=await cascadePL(d,fresh,freshM);
     setPlMap(up);
+    return true;
   };
-  const saveFavs=async d=>{setFavs(d);await sSet("pj_favs2",d);};
-  const savePL=async d=>{setPlMap(d);await sSet("pj_pl",d);};
-  const saveCtb=async d=>{setCtbMap(d);await sSet("pj_ctb",d);};
-  const saveIrrf=async d=>{setIrrfMap(d);await sSet("pj_irrf",d);};
-  const commitIrrf=async()=>{ const v=parseBRL(irrfIn); await saveIrrf({...irrfMap,[plKey]:v>0?v:0}); };
+  const saveFavs=async d=>{const ok=await sSet("pj_favs2",d);if(ok)setFavs(d);else{setStorageWarning(true);notify("Não foi possível salvar os favoritos.","err");}return ok;};
+  const savePL=async d=>{const ok=await sSet("pj_pl",d);if(ok)setPlMap(d);else{setStorageWarning(true);notify("Não foi possível salvar o pró-labore.","err");}return ok;};
+  const saveCtb=async d=>{const ok=await sSet("pj_ctb",d);if(ok)setCtbMap(d);else{setStorageWarning(true);notify("Não foi possível salvar a contabilidade.","err");}return ok;};
+  const saveIrrf=async d=>{const ok=await sSet("pj_irrf",d);if(ok)setIrrfMap(d);else{setStorageWarning(true);notify("Não foi possível salvar o IRRF.","err");}return ok;};
+  const commitIrrf=async()=>{ const raw=irrfIn.trim(); if(!raw){ const next={...irrfMap}; delete next[plKey]; await saveIrrf(next); return; } const v=parseBRL(raw); if(!Number.isFinite(v)||v<0){notify("IRRF inválido.","err");return;} await saveIrrf({...irrfMap,[plKey]:v}); };
 
-  const notify=(msg,type="ok")=>{setToast({msg,type});setTimeout(()=>setToast(null),2800);};
+  const notify=(msg,type="ok")=>{setToast({msg,type});if(toastTimer.current)clearTimeout(toastTimer.current);toastTimer.current=setTimeout(()=>setToast(null),3200);};
 
   const commitPL=async()=>{
     const raw=plIn.trim();
@@ -342,21 +369,29 @@ export default function App() {
   };
   const handleSubmit=async()=>{
     if(!form.valor||!form.data){notify("Informe valor e data.","err");return;}
+    if(!isValidDate(form.data)){notify("Data inválida.","err");return;}
     if(formTipo==="receita"&&!form.nome){notify("Informe o nome da clínica.","err");return;}
     if(formTipo==="despesa"&&!form.categoria){notify("Selecione o tipo de despesa.","err");return;}
-    const valor=parseBRL(form.valor); if(valor<=0){notify("Valor inválido.","err");return;}
-    const tx={id:editId||Date.now().toString(),tipo:formTipo,valor,data:form.data,nome:form.nome||form.categoria,cnpj:form.cnpj,telefone:form.telefone,cep:form.cep,endereco:form.endereco,email:form.email,especialidade:form.especialidade,dente:form.dente,categoria:form.categoria,descricao:form.descricao,notaGerada:form.notaGerada,numeroNota:form.notaGerada?form.numeroNota:"",dataEmissao:form.notaGerada?form.dataEmissao:"",taxaISS:form.notaGerada?form.taxaISS:"",informadoContab:form.notaGerada?form.informadoContab:false};
+    if(form.cnpj&&!isValidDoc(form.cnpj)){notify("CPF/CNPJ inválido.","err");return;}
+    if(form.email&&!isValidEmail(form.email)){notify("E-mail inválido.","err");return;}
+    if(form.telefone&&!isValidPhone(form.telefone)){notify("Telefone inválido.","err");return;}
+    if(form.cep&&digits(form.cep).length!==8){notify("CEP inválido.","err");return;}
+    if(form.notaGerada && formTipo==="receita" && (!form.numeroNota || !isValidDate(form.dataEmissao))){notify("Informe número e data de emissão da NF.","err");return;}
+    if(form.dataEmissao && !isValidDate(form.dataEmissao)){notify("Data de emissão inválida.","err");return;}
+    const iss=parseBRL(form.taxaISS); if(form.taxaISS && (!Number.isFinite(iss)||iss<0||iss>100)){notify("Taxa de ISS inválida.","err");return;}
+    const valor=parseBRL(form.valor); if(!Number.isFinite(valor)||valor<=0){notify("Valor inválido.","err");return;}
+    const tx={id:editId||makeId(),tipo:formTipo,valor,data:form.data,nome:form.nome||form.categoria,cnpj:form.cnpj,telefone:form.telefone,cep:form.cep,endereco:form.endereco,email:form.email,especialidade:form.especialidade,dente:form.dente,categoria:form.categoria,descricao:form.descricao,notaGerada:form.notaGerada,numeroNota:form.notaGerada?form.numeroNota:"",dataEmissao:form.notaGerada?form.dataEmissao:"",taxaISS:form.notaGerada?form.taxaISS:"",informadoContab:form.notaGerada?form.informadoContab:false};
     await saveTxs(editId?txs.map(t=>t.id===editId?tx:t):[tx,...txs]);
     if(form.saveAsFav){
       const key=formTipo==="receita"?form.nome:form.categoria;
-      const fd={id:Date.now().toString(),tipo:formTipo,nome:key,cnpj:form.cnpj,telefone:form.telefone,cep:form.cep,endereco:form.endereco,email:form.email,especialidade:form.especialidade,categoria:form.categoria};
+      const fd={id:makeId(),tipo:formTipo,nome:key,cnpj:form.cnpj,telefone:form.telefone,cep:form.cep,endereco:form.endereco,email:form.email,especialidade:form.especialidade,categoria:form.categoria};
       const ex=favs.find(f=>f.tipo===formTipo&&f.nome===key);
       await saveFavs(ex?favs.map(f=>f.tipo===formTipo&&f.nome===key?{...fd,id:f.id}:f):[...favs,fd]);
     }
     setShowForm(false); notify(editId?"Atualizado!":"Salvo!");
   };
-  const delTx=async id=>{await saveTxs(txs.filter(t=>t.id!==id));notify("Removido.");};
-  const delFav=async id=>{await saveFavs(favs.filter(f=>f.id!==id));notify("Favorito removido.");};
+  const delTx=async id=>{ const tx=txs.find(t=>t.id===id); if(!tx)return; const ok=typeof window!=="undefined"?window.confirm(`Excluir o lançamento de ${fmtBRL(tx.valor)}?\n\nEsta ação não pode ser desfeita.`):true; if(!ok)return; if(await saveTxs(txs.filter(t=>t.id!==id))) notify("Lançamento removido."); };
+  const delFav=async id=>{ const ok=typeof window!=="undefined"?window.confirm("Excluir este favorito?"):true; if(!ok)return; if(await saveFavs(favs.filter(f=>f.id!==id))) notify("Favorito removido.");};
   const applyFav=fav=>{
     if(fav.tipo==="receita") setForm(f=>({...f,nome:fav.nome,cnpj:fav.cnpj||"",telefone:fav.telefone||"",cep:fav.cep||"",endereco:fav.endereco||"",email:fav.email||"",especialidade:fav.especialidade||"",categoria:fav.categoria||""}));
     else setForm(f=>({...f,categoria:fav.nome}));
@@ -381,8 +416,11 @@ export default function App() {
 
   const doImport=async()=>{
     try{
+      if(new Blob([importTxt]).size>BACKUP_MAX_BYTES) throw new Error("Backup muito grande (limite de 2 MB)");
       const d=JSON.parse(importTxt);
       if(!d || typeof d!=="object" || Array.isArray(d)) throw new Error("Formato inválido");
+      if(d.app && d.app!=="contabilidade-pj") throw new Error("Backup de outro aplicativo");
+      if(d.version!=null && (!Number.isFinite(Number(d.version)) || Number(d.version)>APP_VERSION)) throw new Error("Backup de versão futura não suportada");
 
       const txData=d.txs??d.transactions;
       const favData=d.favs??d.favorites;
@@ -395,12 +433,18 @@ export default function App() {
       if(favData!==undefined&&!Array.isArray(favData)) throw new Error("Favoritos inválidos");
       if(plData!==undefined&&(typeof plData!=="object"||Array.isArray(plData))) throw new Error("Pró-labore inválido");
       if(ctbData!==undefined&&(typeof ctbData!=="object"||Array.isArray(ctbData))) throw new Error("Contabilidade inválida");
+      const validateMap=(obj,label)=>{ if(obj===undefined)return; if(!obj||typeof obj!=="object"||Array.isArray(obj))throw new Error(`${label} inválido`); for(const [k,v] of Object.entries(obj)){ if(!/^\d{4}-\d{2}$/.test(k)||!isValidMoney(v))throw new Error(`${label} contém valor inválido`); } };
+      validateMap(manualData,"Pró-labore manual"); validateMap(irrfData,"IRRF"); validateMap(ctbData,"Contabilidade");
 
       // Valida lançamentos antes de tocar no estado atual.
       if(Array.isArray(txData)){
+        const ids=new Set();
         for(const t of txData){
-          if(!t||!t.id||!["receita","despesa"].includes(t.tipo)||!String(t.data||"").match(/^\d{4}-\d{2}-\d{2}$/)||!isValidMoney(t.valor)||num(t.valor)<=0)
-            throw new Error("Existe lançamento inválido no backup");
+          if(!t||!t.id||ids.has(String(t.id))||!["receita","despesa"].includes(t.tipo)||!isValidDate(t.data)||!isValidMoney(t.valor)||num(t.valor)<=0)
+            throw new Error("Existe lançamento inválido ou duplicado no backup");
+          ids.add(String(t.id));
+          if(t.dataEmissao && !isValidDate(t.dataEmissao)) throw new Error("Data de emissão inválida no backup");
+          if(t.cnpj && !isValidDoc(t.cnpj)) throw new Error("CPF/CNPJ inválido no backup");
         }
       }
 
@@ -424,7 +468,7 @@ export default function App() {
   };
 
   return (
-    <div style={{fontFamily:"Georgia,serif",background:C.bg,minHeight:"100vh",maxWidth:430,margin:"0 auto",position:"relative"}}>
+    <div style={{fontFamily:"Georgia,serif",background:C.bg,minHeight:"100vh",width:"100%",maxWidth:900,margin:"0 auto",position:"relative"}}>
 
       {/* Header */}
       <div style={{background:"linear-gradient(180deg,#0F1E35,#1A3055)",position:"sticky",top:0,zIndex:30,boxShadow:"0 2px 12px rgba(0,0,0,0.2)"}}>
@@ -445,8 +489,11 @@ export default function App() {
         <div style={{height:2,background:"linear-gradient(90deg,transparent,#C8A96E,transparent)"}}/>
       </div>
 
+      {storageWarning && <div role="alert" style={{background:"#FFF4E5",borderBottom:"1px solid #F0C89A",padding:"9px 16px",fontSize:11,color:"#9A5B00",textAlign:"center"}}>⚠️ O navegador não confirmou a persistência local. Faça backups regularmente antes de fechar ou trocar de dispositivo.</div>}
+
       {/* Content */}
       <div style={{padding:"16px 16px 90px"}}>
+        {loading ? <Card><p style={{margin:0,textAlign:"center",color:C.muted}}>Carregando dados…</p></Card> : null}
 
         {/* ── DASHBOARD ── */}
         {tab==="dashboard" && (
@@ -492,7 +539,7 @@ export default function App() {
       </div>
 
       {/* Bottom Nav */}
-      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:"rgba(248,245,241,0.97)",backdropFilter:"blur(14px)",borderTop:`1px solid ${C.border}`,display:"flex",paddingBottom:16,zIndex:40}}>
+      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:900,background:"rgba(248,245,241,0.97)",backdropFilter:"blur(14px)",borderTop:`1px solid ${C.border}`,display:"flex",paddingBottom:"calc(16px + env(safe-area-inset-bottom))",zIndex:40}}>
         {nav.map(n=>(
           <button key={n.id} onClick={()=>setTab(n.id)} style={{flex:1,background:"none",border:"none",padding:"12px 0 4px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
             <span style={{fontSize:20,color:tab===n.id?C.navyMid:"#AAA"}}>{n.icon}</span>
@@ -622,7 +669,7 @@ export default function App() {
 
       {/* Notas Modal */}
       {notaModal && (()=>{
-        const recMes=monthTxs.filter(t=>t.tipo==="receita");
+        const recMes=monthTxs.filter(t=>t.tipo==="receita"&&t.categoria!=="Estorno");
         const configs={
           emitEnviadas: {lista:recMes.filter(t=>t.notaGerada&&t.informadoContab),  label:"Emitidas Enviadas",  color:"#27AE60", bg:"#EAFAF1"},
           emitPendentes:{lista:recMes.filter(t=>t.notaGerada&&!t.informadoContab), label:"Emitidas Pendentes", color:C.navyMid,  bg:C.navyLight},
@@ -678,21 +725,21 @@ export default function App() {
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
             <div>
               <p style={{margin:0,fontSize:16,fontWeight:"600",color:C.navy}}>{drillModal.title}</p>
-              <p style={{margin:"3px 0 0",fontSize:11,color:C.muted}}>{drillModal.items.length} lançamentos · {fmtBRL(drillModal.items.reduce((s,t)=>s+t.valor,0))}</p>
+              <p style={{margin:"3px 0 0",fontSize:11,color:C.muted}}>{drillModal.items.length} lançamentos · {fmtBRL(drillModal.items.reduce((s,t)=>s+Math.abs(signedValue(t)),0))}</p>
             </div>
             <CloseBtn onClick={()=>setDrillModal(null)}/>
           </div>
           {drillModal.items.map(tx=>{
-            const d=txMonth(tx); const isR=tx.tipo==="receita";
+            const d=txMonth(tx); const isR=tx.tipo==="receita"; const isEstorno=isR&&tx.categoria==="Estorno"; const shownSign=isEstorno?"-":isR?"+":"-"; const shownColor=isEstorno?C.red:isR?C.navyMid:C.red;
             return (
-              <div key={tx.id} style={{background:"white",borderRadius:14,padding:"13px 15px",marginBottom:10,boxShadow:"0 1px 8px rgba(0,0,0,0.05)",borderLeft:`3px solid ${isR?C.navyMid:C.red}`}}>
+              <div key={tx.id} style={{background:"white",borderRadius:14,padding:"13px 15px",marginBottom:10,boxShadow:"0 1px 8px rgba(0,0,0,0.05)",borderLeft:`3px solid ${shownColor}`}}>
                 <div style={{display:"flex",justifyContent:"space-between"}}>
                   <div>
                     <p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>{tx.nome||"—"}</p>
                     {tx.especialidade&&<p style={{margin:"1px 0 0",fontSize:11,color:C.gold,fontWeight:"600"}}>{tx.especialidade}{tx.dente?" · Dente "+tx.dente:""}</p>}
                     <p style={{margin:"3px 0 0",fontSize:11,color:C.muted}}>{d.getDate().toString().padStart(2,"0")}/{(d.getMonth()+1).toString().padStart(2,"0")}/{d.getFullYear()}</p>
                   </div>
-                  <p style={{margin:0,fontSize:15,fontWeight:"bold",color:isR?C.navyMid:C.red}}>{isR?"+":"-"}{fmtBRL(tx.valor)}</p>
+                  <p style={{margin:0,fontSize:15,fontWeight:"bold",color:shownColor}}>{shownSign}{fmtBRL(tx.valor)}</p>
                 </div>
               </div>
             );
@@ -708,26 +755,26 @@ export default function App() {
             <CloseBtn onClick={()=>setShowSettings(false)}/>
           </div>
           <div style={{display:"flex",gap:8,marginBottom:16}}>
-            <TogBtn active={stab==="export"} color={C.navyMid} bg={C.navyLight} onClick={()=>{ setStab("export"); const d={txs,favs,plMap,ctbMap}; setExportTxt(JSON.stringify(d)); }}>📤 Exportar</TogBtn>
+            <TogBtn active={stab==="export"} color={C.navyMid} bg={C.navyLight} onClick={()=>{ setStab("export"); doExport(); }}>📤 Exportar</TogBtn>
             <TogBtn active={stab==="import"} color="#2980B9" bg="#F0F4FF" onClick={()=>setStab("import")}>📥 Importar</TogBtn>
           </div>
           {stab==="export" && <>
             <div style={{background:"#EBF5EE",borderRadius:12,padding:"12px 14px",marginBottom:14}}>
               <p style={{margin:0,fontSize:13,color:C.navyMid,lineHeight:1.6}}>1. Toque em <b>Gerar Backup</b><br/>2. Pressione e segure o texto<br/>3. <b>Selecionar Tudo</b> → <b>Copiar</b><br/>4. Cole no WhatsApp ou Notas</p>
             </div>
-            <button onClick={()=>{const d={txs,favs,plMap,ctbMap};setExportTxt(JSON.stringify(d));notify("Gerado! Agora copie o texto.");}} style={{width:"100%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,border:"none",borderRadius:14,padding:"14px",color:"white",fontFamily:"inherit",fontSize:14,fontWeight:"700",cursor:"pointer",marginBottom:10}}>📋 Gerar Backup</button>
+            <button onClick={()=>{doExport();notify("Backup completo gerado.");}} style={{width:"100%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,border:"none",borderRadius:14,padding:"14px",color:"white",fontFamily:"inherit",fontSize:14,fontWeight:"700",cursor:"pointer",marginBottom:10}}>📋 Gerar Backup</button>
             {exportTxt&&<>
               <textarea id="backup-txt" readOnly value={exportTxt} rows={4} onClick={e=>{e.target.focus();e.target.select();}} style={{...iSt,fontFamily:"monospace",fontSize:10,resize:"none",background:"#FFFFF0",border:"2px solid #C8A96E",marginBottom:10}}/>
-              <button onClick={()=>{
-                const el=document.getElementById("backup-txt");
-                if(el){el.focus();el.select();}
+              <button onClick={async()=>{
                 try{
-                  const ok=document.execCommand("copy");
-                  notify(ok?"✅ Copiado! Cole no WhatsApp ou Notas.":"Selecione o texto e copie manualmente.","ok");
-                }catch(e){ notify("Pressione e segure o texto → Selecionar Tudo → Copiar","warn"); }
+                  if(navigator.clipboard?.writeText) await navigator.clipboard.writeText(exportTxt);
+                  else { const el=document.getElementById("backup-txt"); if(el){el.focus();el.select();document.execCommand("copy");} }
+                  notify("✅ Backup copiado.","ok");
+                }catch(e){ notify("Selecione o texto e use Copiar manualmente.","warn"); }
               }} style={{width:"100%",background:"linear-gradient(135deg,#1A3055,#2D5A7A)",border:"none",borderRadius:14,padding:"14px",color:"white",fontFamily:"inherit",fontSize:15,fontWeight:"700",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
                 📋 Copiar Backup
               </button>
+              <button onClick={()=>{try{const blob=new Blob([exportTxt],{type:"application/json;charset=utf-8"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`backup-contabilidade-pj-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);notify("Backup baixado.");}catch(e){notify("Não foi possível baixar o arquivo.","err");}}} style={{width:"100%",marginTop:8,background:"#F5F5F0",border:"1px solid #E0D8CE",borderRadius:14,padding:"12px",color:C.navyMid,fontFamily:"inherit",fontSize:14,fontWeight:"700",cursor:"pointer"}}>⬇️ Baixar arquivo JSON</button>
             </>}
           </>}
           {stab==="import" && <>
@@ -748,7 +795,7 @@ export default function App() {
 
 /* ─── Tab Components ─────────────────────────────── */
 function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,MONTHS,DAS,aliq,rbt12,rbt12P,mesesR,fatorR,anexo,PLauto,PLef,plIn,setPlIn,commitPL,INSS,CTB,ctbIn,setCtbIn,commitCtb,IRRFauto,IRRFef,irrfIn,setIrrfIn,commitIrrf,totalObrig,C,fmtBRL,fmtIn,setNotaModal,openEdit}){
-  const recMes=monthTxs.filter(t=>t.tipo==="receita");
+  const recMes=monthTxs.filter(t=>t.tipo==="receita"&&t.categoria!=="Estorno");
   const emit=recMes.filter(t=>t.notaGerada), pend=recMes.filter(t=>!t.notaGerada);
   return(<>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
@@ -759,8 +806,8 @@ function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,MONTHS,D
     <Card style={{marginBottom:12}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
         <div>
-          <SmLabel>Saldo Acumulado do Mês</SmLabel>
-          <p style={{margin:"2px 0 0",fontSize:11,color:"#BBB"}}>Receitas − Despesas · {MONTHS[month]} {year}</p>
+          <SmLabel>Resultado do Mês</SmLabel>
+          <p style={{margin:"2px 0 0",fontSize:11,color:"#BBB"}}>Receitas − Despesas · {MONTHS[month]} {year} · não representa saldo bancário</p>
         </div>
         <div style={{textAlign:"right"}}>
           <p style={{margin:0,fontSize:26,fontWeight:"bold",color:resultado>=0?C.navyMid:C.red,letterSpacing:-1}}>{fmtBRL(resultado)}</p>
@@ -836,7 +883,7 @@ function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,MONTHS,D
       </div>
     </Card>
     {(()=>{
-      const recMes=monthTxs.filter(t=>t.tipo==="receita");
+      const recMes=monthTxs.filter(t=>t.tipo==="receita"&&t.categoria!=="Estorno");
       const emitEnv=recMes.filter(t=>t.notaGerada&&t.informadoContab);
       const emitPend=recMes.filter(t=>t.notaGerada&&!t.informadoContab);
       const naoEmit=recMes.filter(t=>!t.notaGerada);
@@ -922,7 +969,7 @@ function FavTab({favs,delFav,openNew,applyFav,C}){
 }
 
 function StatTab({monthTxs,receitas,despesas,month,year,MONTHS,C,fmtV,hideVal,setHideVal,setDrillModal,fmtBRL}){
-  const recMes=monthTxs.filter(t=>t.tipo==="receita");
+  const recMes=monthTxs.filter(t=>t.tipo==="receita"&&t.categoria!=="Estorno");
   const ECOLS={"Endodontia":C.navyMid,"Ortodontia":C.gold,"Outros":C.muted};
   return(<>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
@@ -954,7 +1001,7 @@ function StatTab({monthTxs,receitas,despesas,month,year,MONTHS,C,fmtV,hideVal,se
                   <span style={{fontSize:13,fontWeight:"bold",color:ECOLS[esp]}}>{fmtV(val)}</span>
                 </div>
                 <div style={{height:4,background:"#F0EBE3",borderRadius:4}}>
-                  <div style={{height:4,width:`${receitas>0?(val/receitas)*100:0}%`,background:ECOLS[esp],borderRadius:4,opacity:0.8}}/>
+                  <div style={{height:4,width:`${tot>0?(val/tot)*100:0}%`,background:ECOLS[esp],borderRadius:4,opacity:0.8}}/>
                 </div>
               </div>
             ))}
@@ -1020,7 +1067,7 @@ function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF}){
   const MS=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
   const data=MS.map((mes,i)=>{
     const key=`${year}-${String(i+1).padStart(2,"0")}`;
-    const receita=txs.filter(t=>{ const d=new Date(t.data+"T12:00:00"); return t.tipo==="receita"&&d.getMonth()===i&&d.getFullYear()===year; }).reduce((s,t)=>s+t.valor,0);
+    const receita=txs.filter(t=>{ const d=txMonth(t); return t.tipo==="receita"&&d?.getMonth()===i&&d?.getFullYear()===year; }).reduce((s,t)=>s+Math.max(0,signedValue(t)),0);
     const pl=plMap[key]||0;
     const inss=calcINSS(pl);
     const irrf=irrfMap[key]!=null?num(irrfMap[key]):calcIRRF(pl,inss);
@@ -1084,22 +1131,23 @@ function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF}){
 
 function TxCard({tx,onEdit,onDelete,C,fmtBRL,MONTHS}){
   const [open,setOpen]=useState(false);
-  const d=txMonth(tx); const isR=tx.tipo==="receita";
+  const d=txMonth(tx); const isR=tx.tipo==="receita"; const isEstorno=isR&&tx.categoria==="Estorno"; const shownSign=isEstorno?"-":isR?"+":"-"; const shownColor=isEstorno?C.red:isR?C.navyMid:C.red;
   return(
-    <div style={{background:"white",borderRadius:16,padding:"13px 15px",marginBottom:10,boxShadow:"0 1px 8px rgba(0,0,0,0.05)",borderLeft:`3px solid ${isR?C.navyMid:C.red}`}}>
+    <div style={{background:"white",borderRadius:16,padding:"13px 15px",marginBottom:10,boxShadow:"0 1px 8px rgba(0,0,0,0.05)",borderLeft:`3px solid ${shownColor}`}}>
       <div style={{display:"flex",alignItems:"center",gap:11}}>
         <div style={{background:isR?C.navyLight:C.redLight,borderRadius:11,padding:"7px 9px",textAlign:"center",minWidth:44}}>
-          <p style={{margin:0,fontSize:15,fontWeight:"bold",color:isR?C.navyMid:C.red,lineHeight:1}}>{d.getDate().toString().padStart(2,"0")}</p>
+          <p style={{margin:0,fontSize:15,fontWeight:"bold",color:shownColor,lineHeight:1}}>{d.getDate().toString().padStart(2,"0")}</p>
           <p style={{margin:0,fontSize:9,color:"#8B7F72",letterSpacing:1}}>{MONTHS[d.getMonth()].slice(0,3).toUpperCase()}</p>
         </div>
         <div style={{flex:1,minWidth:0}}>
           <p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{tx.nome||"—"}</p>
           {tx.especialidade&&<p style={{margin:"1px 0 0",fontSize:11,color:C.gold,fontWeight:"600"}}>{tx.especialidade}{tx.dente?" · Dente "+tx.dente:""}</p>}
           {tx.descricao&&<p style={{margin:"1px 0 0",fontSize:11,color:"#BBB",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{tx.descricao}</p>}
-          {isR&&<span style={{display:"inline-block",marginTop:3,fontSize:10,background:tx.notaGerada?"#EBF5EE":C.redLight,color:tx.notaGerada?C.navyMid:C.red,borderRadius:5,padding:"2px 7px",fontWeight:"600"}}>{tx.notaGerada?`✅ NF${tx.numeroNota?" #"+tx.numeroNota:""}`:   "⏳ NF Pendente"}</span>}
+          {isEstorno&&<span style={{display:"inline-block",marginTop:3,fontSize:10,background:C.redLight,color:C.red,borderRadius:5,padding:"2px 7px",fontWeight:"700"}}>↩️ Estorno</span>}
+          {isR&&!isEstorno&&<span style={{display:"inline-block",marginTop:3,fontSize:10,background:tx.notaGerada?"#EBF5EE":C.redLight,color:tx.notaGerada?C.navyMid:C.red,borderRadius:5,padding:"2px 7px",fontWeight:"600"}}>{tx.notaGerada?`✅ NF${tx.numeroNota?" #"+tx.numeroNota:""}`:   "⏳ NF Pendente"}</span>}
         </div>
         <div style={{textAlign:"right",flexShrink:0}}>
-          <p style={{margin:0,fontSize:15,fontWeight:"bold",color:isR?C.navyMid:C.red}}>{isR?"+":"-"}{fmtBRL(tx.valor)}</p>
+          <p style={{margin:0,fontSize:15,fontWeight:"bold",color:shownColor}}>{shownSign}{fmtBRL(tx.valor)}</p>
           <button onClick={()=>setOpen(!open)} style={{background:"none",border:"none",color:"#CCC",fontSize:13,cursor:"pointer",padding:0}}>{open?"▲":"▾"}</button>
         </div>
       </div>
@@ -1112,7 +1160,24 @@ function TxCard({tx,onEdit,onDelete,C,fmtBRL,MONTHS}){
 }
 
 /* ─── Micro components ───────────────────────────── */
-function Modal({children,onClose}){return(<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:50,display:"flex",alignItems:"flex-end"}} onClick={e=>e.target===e.currentTarget&&onClose()}><div style={{background:"#FAF7F3",borderRadius:"24px 24px 0 0",width:"100%",maxWidth:430,margin:"0 auto",padding:"22px 20px 44px",boxShadow:"0 -8px 40px rgba(0,0,0,0.18)",maxHeight:"90vh",overflowY:"auto"}}>{children}</div></div>);}
+function Modal({children,onClose}){
+  const boxRef=useRef(null);
+  useEffect(()=>{
+    const box=boxRef.current;
+    const focusable=()=>box?.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')||[];
+    const first=focusable()[0]; if(first&&typeof first.focus==="function")first.focus();
+    const fn=e=>{
+      if(e.key==="Escape"){e.preventDefault();onClose();return;}
+      if(e.key!=="Tab")return;
+      const els=[...focusable()]; if(!els.length)return;
+      const firstEl=els[0],lastEl=els[els.length-1];
+      if(e.shiftKey&&document.activeElement===firstEl){e.preventDefault();lastEl.focus();}
+      else if(!e.shiftKey&&document.activeElement===lastEl){e.preventDefault();firstEl.focus();}
+    };
+    document.addEventListener("keydown",fn); return()=>document.removeEventListener("keydown",fn);
+  },[onClose]);
+  return(<div role="dialog" aria-modal="true" aria-label="Janela" style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:50,display:"flex",alignItems:"flex-end",paddingBottom:"env(safe-area-inset-bottom)"}} onClick={e=>e.target===e.currentTarget&&onClose()}><div ref={boxRef} style={{background:"#FAF7F3",borderRadius:"24px 24px 0 0",width:"100%",maxWidth:430,margin:"0 auto",padding:"22px 20px 44px",boxShadow:"0 -8px 40px rgba(0,0,0,0.18)",maxHeight:"90vh",overflowY:"auto",overscrollBehavior:"contain"}}>{children}</div></div>);
+}
 function Card({children,style}){return(<div style={{background:"white",borderRadius:18,padding:"18px",boxShadow:"0 2px 16px rgba(0,0,0,0.06)",...style}}>{children}</div>);}
 function SmLabel({children,style}){return(<p style={{margin:0,fontSize:10,color:"#8B7F72",letterSpacing:2,textTransform:"uppercase",...style}}>{children}</p>);}
 function BigVal({children,color}){return(<p style={{margin:"6px 0 0",fontSize:20,fontWeight:"bold",color,letterSpacing:-0.5}}>{children}</p>);}
@@ -1122,5 +1187,5 @@ function MS({label,value,color,f}){return(<div style={{flex:1,textAlign:"center"
 function Pill({children,color,bg}){return(<span style={{background:bg,color,borderRadius:10,padding:"5px 14px",fontSize:13,fontWeight:"700"}}>{children}</span>);}
 function CloseBtn({onClick}){return(<button onClick={onClick} style={{background:"#EDEDE8",border:"none",borderRadius:50,width:32,height:32,fontSize:15,cursor:"pointer",color:"#555"}}>✕</button>);}
 function TogBtn({active,color,bg,onClick,children}){return(<button onClick={onClick} style={{flex:1,padding:"11px",borderRadius:12,border:`2px solid ${active?color:"#E0D8CE"}`,background:active?bg:"white",color:active?color:"#BBB",fontFamily:"inherit",fontSize:13,fontWeight:"600",cursor:"pointer"}}>{children}</button>);}
-function ChkBox({checked,onChange}){return(<div onClick={()=>onChange(!checked)} style={{width:22,height:22,borderRadius:6,border:`2px solid ${checked?"#1A3055":"#CCC"}`,background:checked?"#1A3055":"white",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>{checked&&<span style={{color:"white",fontSize:13}}>✓</span>}</div>);}
+function ChkBox({checked,onChange}){return(<button type="button" aria-pressed={checked} aria-label={checked?"Marcado":"Não marcado"} onClick={()=>onChange(!checked)} style={{width:22,height:22,borderRadius:6,border:`2px solid ${checked?"#1A3055":"#CCC"}`,background:checked?"#1A3055":"white",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,padding:0}}>{checked&&<span style={{color:"white",fontSize:13}}>✓</span>}</button>);}
 function MoneyIn({value,onChange,onBlur,placeholder}){return(<div style={{position:"relative"}}><span style={{position:"absolute",left:13,top:"50%",transform:"translateY(-50%)",color:"#8B7F72",fontSize:14}}>R$</span><input value={value} onChange={e=>onChange(e.target.value.replace(/[^0-9,]/g,""))} onBlur={onBlur} inputMode="numeric" placeholder={placeholder} style={{width:"100%",background:"white",border:"1px solid #E0D8CE",borderRadius:12,padding:"12px 14px 12px 38px",fontSize:15,fontFamily:"inherit",color:"#1A1A1A",outline:"none",boxSizing:"border-box"}}/></div>);}
