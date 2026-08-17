@@ -1,46 +1,6 @@
 import Head from 'next/head'
-import { useEffect } from 'react'
 
 export default function MyApp({ Component, pageProps }) {
-  useEffect(() => {
-    if (
-      typeof window === 'undefined' ||
-      !('serviceWorker' in navigator)
-    ) {
-      return
-    }
-
-    const registerServiceWorker = async () => {
-      try {
-        await navigator.serviceWorker.register('/sw.js', {
-          scope: '/',
-          updateViaCache: 'none',
-        })
-      } catch (error) {
-        console.error(
-          'Falha ao registrar o Service Worker:',
-          error
-        )
-      }
-    }
-
-    if (document.readyState === 'complete') {
-      registerServiceWorker()
-    } else {
-      window.addEventListener(
-        'load',
-        registerServiceWorker
-      )
-    }
-
-    return () => {
-      window.removeEventListener(
-        'load',
-        registerServiceWorker
-      )
-    }
-  }, [])
-
   return (
     <>
       <Head>
