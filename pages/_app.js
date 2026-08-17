@@ -14,6 +14,7 @@ export default function MyApp({ Component, pageProps }) {
       try {
         await navigator.serviceWorker.register('/sw.js', {
           scope: '/',
+          updateViaCache: 'none',
         })
       } catch (error) {
         console.error(
@@ -23,10 +24,14 @@ export default function MyApp({ Component, pageProps }) {
       }
     }
 
-    window.addEventListener(
-      'load',
-      registerServiceWorker
-    )
+    if (document.readyState === 'complete') {
+      registerServiceWorker()
+    } else {
+      window.addEventListener(
+        'load',
+        registerServiceWorker
+      )
+    }
 
     return () => {
       window.removeEventListener(
