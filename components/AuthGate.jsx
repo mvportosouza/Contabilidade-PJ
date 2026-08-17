@@ -17,15 +17,19 @@ export default function AuthGate({ children }) {
 
     supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return
+
       setSession(data.session || null)
       setLoading(false)
     })
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      if (!mounted) return
-      setSession(nextSession || null)
-      setLoading(false)
-    })
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      (_event, nextSession) => {
+        if (!mounted) return
+
+        setSession(nextSession || null)
+        setLoading(false)
+      }
+    )
 
     return () => {
       mounted = false
@@ -35,35 +39,70 @@ export default function AuthGate({ children }) {
 
   const submit = async (event) => {
     event.preventDefault()
+
     setBusy(true)
     setError('')
     setMessage('')
 
     try {
       if (!email.trim() || password.length < 6) {
-        throw new Error('Informe um e-mail válido e uma senha com pelo menos 6 caracteres.')
+        throw new Error(
+          'Informe um e-mail válido e uma senha com pelo menos 6 caracteres.'
+        )
       }
 
       if (mode === 'login') {
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
-          password,
-        })
-        if (signInError) throw signInError
+        const { error: signInError } =
+          await supabase.auth.signInWithPassword({
+            email: email.trim(),
+            password,
+          })
+
+        if (signInError) {
+          throw signInError
+        }
       } else {
-        const { data, error: signUpError } = await supabase.auth.signUp({
-          email: email.trim(),
-          password,
-        })
-        if (signUpError) throw signUpError
+        /*
+         * Define para onde o usuário será levado depois
+         * de confirmar o e-mail.
+         *
+         * Em produção:
+         * https://seu-dominio.com/
+         *
+         * Em desenvolvimento:
+         * http://localhost:3000/
+         */
+        const emailRedirectTo = `${window.location.origin}/`
+
+        const { data, error: signUpError } =
+          await supabase.auth.signUp({
+            email: email.trim(),
+            password,
+            options: {
+              emailRedirectTo,
+            },
+          })
+
+        if (signUpError) {
+          throw signUpError
+        }
 
         if (!data.session) {
-          setMessage('Cadastro realizado. Verifique seu e-mail para confirmar a conta e depois faça o login.')
+          setMessage(
+            'Cadastro realizado. Verifique seu e-mail para confirmar a conta e depois faça o login.'
+          )
+
           setMode('login')
+          setPassword('')
+        } else {
+          setMessage('Cadastro realizado com sucesso.')
         }
       }
     } catch (err) {
-      setError(err?.message || 'Não foi possível concluir a operação.')
+      setError(
+        err?.message ||
+          'Não foi possível concluir a operação.'
+      )
     } finally {
       setBusy(false)
     }
@@ -80,8 +119,14 @@ export default function AuthGate({ children }) {
       <div style={styles.page}>
         <div style={styles.card}>
           <div style={styles.spinner}>⏳</div>
-          <h1 style={styles.title}>Finanças PJ</h1>
-          <p style={styles.muted}>Verificando sua sessão…</p>
+
+          <h1 style={styles.title}>
+            Finanças PJ
+          </h1>
+
+          <p style={styles.muted}>
+            Verificando sua sessão…
+          </p>
         </div>
       </div>
     )
@@ -90,28 +135,120 @@ export default function AuthGate({ children }) {
   if (!session) {
     return (
       <div style={styles.page}>
-        <form onSubmit={submit} style={styles.card}>
-          <div style={styles.logo}>MV</div>
-          <h1 style={styles.title}>Finanças PJ</h1>
-          <p style={styles.subtitle}>Acesse sua gestão financeira com sincronização segura.</p>
-
-          <div style={styles.tabs}>
-            <button type="button" onClick={() => { setMode('login'); setError(''); setMessage('') }} style={mode === 'login' ? styles.tabActive : styles.tab}>Entrar</button>
-            <button type="button" onClick={() => { setMode('signup'); setError(''); setMessage('') }} style={mode === 'signup' ? styles.tabActive : styles.tab}>Criar conta</button>
+        <form
+          onSubmit={submit}
+          style={styles.card}
+        >
+          <div style={styles.logo}>
+            MV
           </div>
 
-          <label style={styles.label}>E-mail</label>
-          <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" autoComplete="email" placeholder="seu@email.com" style={styles.input} />
+          <h1 style={styles.title}>
+            Finanças PJ
+          </h1>
 
-          <label style={styles.label}>Senha</label>
-          <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} placeholder="Mínimo de 6 caracteres" style={styles.input} />
+          <p style={styles.subtitle}>
+            Acesse sua gestão financeira com
+            sincronização segura.
+          </p>
 
-          {error ? <div style={styles.error}>{error}</div> : null}
-          {message ? <div style={styles.success}>{message}</div> : null}
+          <div style={styles.tabs}>
+            <button
+              type="button"
+              onClick={() => {
+                setMode('login')
+                setError('')
+                setMessage('')
+              }}
+              style={
+                mode === 'login'
+                  ? styles.tabActive
+                  : styles.tab
+              }
+            >
+              Entrar
+            </button>
 
-          <button disabled={busy} type="submit" style={styles.primary}>{busy ? 'Aguarde…' : mode === 'login' ? 'Entrar' : 'Criar conta'}</button>
+            <button
+              type="button"
+              onClick={() => {
+                setMode('signup')
+                setError('')
+                setMessage('')
+              }}
+              style={
+                mode === 'signup'
+                  ? styles.tabActive
+                  : styles.tab
+              }
+            >
+              Criar conta
+            </button>
+          </div>
 
-          <p style={styles.note}>Seus dados financeiros serão vinculados à sua conta e protegidos por RLS no Supabase.</p>
+          <label style={styles.label}>
+            E-mail
+          </label>
+
+          <input
+            value={email}
+            onChange={(e) =>
+              setEmail(e.target.value)
+            }
+            type="email"
+            autoComplete="email"
+            placeholder="seu@email.com"
+            style={styles.input}
+          />
+
+          <label style={styles.label}>
+            Senha
+          </label>
+
+          <input
+            value={password}
+            onChange={(e) =>
+              setPassword(e.target.value)
+            }
+            type="password"
+            autoComplete={
+              mode === 'login'
+                ? 'current-password'
+                : 'new-password'
+            }
+            placeholder="Mínimo de 6 caracteres"
+            style={styles.input}
+          />
+
+          {error ? (
+            <div style={styles.error}>
+              {error}
+            </div>
+          ) : null}
+
+          {message ? (
+            <div style={styles.success}>
+              {message}
+            </div>
+          ) : null}
+
+          <button
+            disabled={busy}
+            type="submit"
+            style={styles.primary}
+          >
+            {busy
+              ? 'Aguarde…'
+              : mode === 'login'
+              ? 'Entrar'
+              : 'Criar conta'}
+          </button>
+
+          <p style={styles.note}>
+            Seus dados financeiros serão
+            vinculados à sua conta e protegidos
+            por RLS no Supabase.
+          </p>
         </form>
       </div>
     )
@@ -120,27 +257,171 @@ export default function AuthGate({ children }) {
   return (
     <>
       {children}
-      <button onClick={signOut} style={styles.signOut} title="Sair da conta">Sair</button>
+
+      <button
+        onClick={signOut}
+        style={styles.signOut}
+        title="Sair da conta"
+      >
+        Sair
+      </button>
     </>
   )
 }
 
 const styles = {
-  page: { minHeight: '100vh', background: '#F2F0ED', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, boxSizing: 'border-box', fontFamily: 'Arial, sans-serif' },
-  card: { width: '100%', maxWidth: 430, background: '#fff', borderRadius: 22, padding: 28, boxSizing: 'border-box', boxShadow: '0 15px 45px rgba(0,0,0,.10)' },
-  logo: { width: 58, height: 58, borderRadius: 16, background: '#0F1E35', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 22, marginBottom: 18 },
-  spinner: { fontSize: 24 },
-  title: { margin: '0 0 8px', color: '#0F1E35', fontSize: 27 },
-  subtitle: { margin: '0 0 22px', color: '#6B655E', lineHeight: 1.5 },
-  muted: { color: '#6B655E' },
-  tabs: { display: 'flex', gap: 8, marginBottom: 20 },
-  tab: { flex: 1, border: '1px solid #E0D8CE', background: '#fff', borderRadius: 10, padding: 10, color: '#777', cursor: 'pointer' },
-  tabActive: { flex: 1, border: '1px solid #0F1E35', background: '#0F1E35', borderRadius: 10, padding: 10, color: '#fff', cursor: 'pointer' },
-  label: { display: 'block', margin: '12px 0 6px', color: '#4D473F', fontWeight: 700, fontSize: 13 },
-  input: { width: '100%', boxSizing: 'border-box', border: '1px solid #D9D2C8', borderRadius: 11, padding: '12px 13px', fontSize: 15, outline: 'none' },
-  primary: { width: '100%', border: 0, borderRadius: 12, padding: 13, marginTop: 18, background: '#0F1E35', color: '#fff', fontWeight: 800, fontSize: 15, cursor: 'pointer' },
-  error: { marginTop: 14, padding: 11, borderRadius: 10, background: '#FCEAEA', color: '#9B2525', fontSize: 13, lineHeight: 1.4 },
-  success: { marginTop: 14, padding: 11, borderRadius: 10, background: '#EAF7EE', color: '#236B3A', fontSize: 13, lineHeight: 1.4 },
-  note: { margin: '16px 0 0', color: '#8A837A', fontSize: 11, lineHeight: 1.5 },
-  signOut: { position: 'fixed', top: 12, right: 12, zIndex: 9999, border: '1px solid #D9D2C8', background: '#fff', color: '#555', borderRadius: 10, padding: '7px 11px', cursor: 'pointer', boxShadow: '0 3px 12px rgba(0,0,0,.08)' },
+  page: {
+    minHeight: '100vh',
+    background: '#F2F0ED',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+    boxSizing: 'border-box',
+    fontFamily: 'Arial, sans-serif',
+  },
+
+  card: {
+    width: '100%',
+    maxWidth: 430,
+    background: '#fff',
+    borderRadius: 22,
+    padding: 28,
+    boxSizing: 'border-box',
+    boxShadow:
+      '0 15px 45px rgba(0,0,0,.10)',
+  },
+
+  logo: {
+    width: 58,
+    height: 58,
+    borderRadius: 16,
+    background: '#0F1E35',
+    color: '#fff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontWeight: 800,
+    fontSize: 22,
+    marginBottom: 18,
+  },
+
+  spinner: {
+    fontSize: 24,
+  },
+
+  title: {
+    margin: '0 0 8px',
+    color: '#0F1E35',
+    fontSize: 27,
+  },
+
+  subtitle: {
+    margin: '0 0 22px',
+    color: '#6B655E',
+    lineHeight: 1.5,
+  },
+
+  muted: {
+    color: '#6B655E',
+  },
+
+  tabs: {
+    display: 'flex',
+    gap: 8,
+    marginBottom: 20,
+  },
+
+  tab: {
+    flex: 1,
+    border: '1px solid #E0D8CE',
+    background: '#fff',
+    borderRadius: 10,
+    padding: 10,
+    color: '#777',
+    cursor: 'pointer',
+  },
+
+  tabActive: {
+    flex: 1,
+    border: '1px solid #0F1E35',
+    background: '#0F1E35',
+    borderRadius: 10,
+    padding: 10,
+    color: '#fff',
+    cursor: 'pointer',
+  },
+
+  label: {
+    display: 'block',
+    margin: '12px 0 6px',
+    color: '#4D473F',
+    fontWeight: 700,
+    fontSize: 13,
+  },
+
+  input: {
+    width: '100%',
+    boxSizing: 'border-box',
+    border: '1px solid #D9D2C8',
+    borderRadius: 11,
+    padding: '12px 13px',
+    fontSize: 15,
+    outline: 'none',
+  },
+
+  primary: {
+    width: '100%',
+    border: 0,
+    borderRadius: 12,
+    padding: 13,
+    marginTop: 18,
+    background: '#0F1E35',
+    color: '#fff',
+    fontWeight: 800,
+    fontSize: 15,
+    cursor: 'pointer',
+  },
+
+  error: {
+    marginTop: 14,
+    padding: 11,
+    borderRadius: 10,
+    background: '#FCEAEA',
+    color: '#9B2525',
+    fontSize: 13,
+    lineHeight: 1.4,
+  },
+
+  success: {
+    marginTop: 14,
+    padding: 11,
+    borderRadius: 10,
+    background: '#EAF7EE',
+    color: '#236B3A',
+    fontSize: 13,
+    lineHeight: 1.4,
+  },
+
+  note: {
+    margin: '16px 0 0',
+    color: '#8A837A',
+    fontSize: 11,
+    lineHeight: 1.5,
+  },
+
+  signOut: {
+    position: 'fixed',
+    top: 12,
+    right: 12,
+    zIndex: 9999,
+    border: '1px solid #D9D2C8',
+    background: '#fff',
+    color: '#555',
+    borderRadius: 10,
+    padding: '7px 11px',
+    cursor: 'pointer',
+    boxShadow:
+      '0 3px 12px rgba(0,0,0,.08)',
+  },
 }
