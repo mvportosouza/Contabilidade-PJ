@@ -1,7 +1,6 @@
-const CACHE_NAME = "financas-mvps-v2";
+const CACHE_NAME = "financas-mvps-v3";
 
 const STATIC_ASSETS = [
-  "/",
   "/manifest.json",
   "/icon-192.png",
   "/icon-512.png",
@@ -9,7 +8,9 @@ const STATIC_ASSETS = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(STATIC_ASSETS);
+    })
   );
 
   self.skipWaiting();
@@ -39,7 +40,7 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
 
-  // Não interceptar APIs/Supabase nem requisições externas.
+  // Não interceptar Supabase, APIs ou requisições externas.
   if (
     url.origin !== self.location.origin ||
     url.pathname.startsWith("/api/")
@@ -47,6 +48,28 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Navegação SEMPRE busca a versão atual do servidor.
+  // Isso evita misturar HTML de builds diferentes.
+  if (request.mode === "navigate") {
+    event.respondWith(
+      fetch(request).catch(
+        () =>
+          new Response(
+            "Sem conexão. Conecte-se à internet e tente novamente.",
+            {
+              status: 503,
+              headers: {
+                "Content-Type": "text/plain; charset=utf-8",
+              },
+            }
+          )
+      )
+    );
+
+    return;
+  }
+
+  // Arquivos estáticos podem ser armazenados em cache.
   event.respondWith(
     fetch(request)
       .then((response) => {
