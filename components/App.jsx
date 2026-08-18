@@ -7,6 +7,7 @@ import {
   calcIRRF,
   calcRBT12,
   calcRecommendedPL,
+  calcTributacao,
   SALARIO_MINIMO_2026,
 } from "../lib/taxes";
 import { PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine } from "recharts";
