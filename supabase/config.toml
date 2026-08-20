@@ -1,0 +1,10 @@
+project_id = "qthvrxnldlttvyspnesc"
+
+[db]
+major_version = 17
+
+[api]
+enabled = true
+
+[auth]
+enabled = true
