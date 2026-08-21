@@ -6,19 +6,46 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+
     labels:
       - dependencies
       - security
+
     commit-message:
       prefix: deps
+
+    # Major versions of these packages must be upgraded
+    # together and tested as a dedicated compatibility batch.
+    ignore:
+      - dependency-name: next
+        update-types:
+          - version-update:semver-major
+
+      - dependency-name: react
+        update-types:
+          - version-update:semver-major
+
+      - dependency-name: react-dom
+        update-types:
+          - version-update:semver-major
+
+      - dependency-name: recharts
+        update-types:
+          - version-update:semver-major
+
+      - dependency-name: eslint-config-next
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
     open-pull-requests-limit: 3
+
     labels:
       - ci
       - security
+
     commit-message:
       prefix: ci
