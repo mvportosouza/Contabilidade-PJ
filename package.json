@@ -18,7 +18,7 @@
     "recharts": "^2.12.7"
   },
   "devDependencies": {
-    "eslint": "^8",
+    "eslint": "^10",
     "eslint-config-next": "^14.2.0",
     "vitest": "^3.2.7"
   }
