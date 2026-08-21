@@ -159,9 +159,24 @@ export default function App() {
 
   const plKey=`${year}-${String(month+1).padStart(2,"0")}`;
 
-  useEffect(()=>{ setPlIn(storedMoneyInput(plMap[plKey])); },[plKey,plMap]);
-  useEffect(()=>{ setCtbIn(storedMoneyInput(ctbMap[plKey])); },[plKey,ctbMap]);
-  useEffect(()=>{ setIrrfIn(storedMoneyInput(irrfMap[plKey])); },[plKey,irrfMap]);
+useEffect(() => {
+  // Necessário para sincronizar o campo de entrada com o mês selecionado.
+  // O valor é derivado de estado persistido e precisa atualizar quando o mês/mapa muda.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  setPlIn(storedMoneyInput(plMap[plKey]));
+}, [plKey, plMap]);
+
+useEffect(() => {
+  // Necessário para sincronizar o campo de entrada com o mês selecionado.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  setCtbIn(storedMoneyInput(ctbMap[plKey]));
+}, [plKey, ctbMap]);
+
+useEffect(() => {
+  // Necessário para sincronizar o campo de entrada com o mês selecionado.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  setIrrfIn(storedMoneyInput(irrfMap[plKey]));
+}, [plKey, irrfMap]);
 
   /* ── Derived ── */
   const financeMonth = calculateMonthlyFinance(txs, year, month);
