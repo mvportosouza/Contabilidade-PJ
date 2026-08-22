@@ -664,7 +664,7 @@ export default function App() {
           <StatTab
             monthTxs={monthTxs} receitas={receitas} despesas={despesas}
             month={month} year={year} MONTHS={MONTHS} C={C}
-            fmtV={fmtV} hideVal={hideVal} setHideVal={setHideVal}
+            fmtV={fmtV}
             setDrillModal={setDrillModal} fmtBRL={fmtMoney}
           />
         )}
@@ -1210,16 +1210,13 @@ function LancTab({monthTxs,receitas,despesas,resultado,month,year,MONTHS,C,fmtBR
   </>);
 }
 
-function StatTab({monthTxs,receitas,despesas,month,year,MONTHS,C,fmtV,hideVal,setHideVal,setDrillModal,fmtBRL}){
+function StatTab({monthTxs,receitas,despesas,month,year,MONTHS,C,fmtV,setDrillModal,fmtBRL}){
   const stats=getMonthlyStatistics(monthTxs);
   const recMes=stats.receitas;
   const ECOLS={"Endodontia":C.navyMid,"Ortodontia":C.gold,"Outros":C.muted};
   return(<>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
       <p style={{margin:0,fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase"}}>{MONTHS[month]} {year}</p>
-      <button onClick={()=>setHideVal(v=>!v)} style={{background:hideVal?C.navyMid:"white",border:`1.5px solid ${hideVal?C.navyMid:C.border}`,borderRadius:10,padding:"7px 14px",color:hideVal?"white":C.muted,fontSize:12,fontFamily:"inherit",fontWeight:"600",cursor:"pointer"}}>
-        {hideVal?"👁 Mostrar valores":"🙈 Ocultar valores"}
-      </button>
     </div>
 
     {/* Receita por Clínica por Especialidade */}
