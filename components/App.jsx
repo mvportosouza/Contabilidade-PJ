@@ -1,6 +1,8 @@
 'use client';
 import { useState, useEffect, useRef } from "react";
-import { sGet, sSet } from "../lib/storage";
+import { deleteAllAppData, sGet, sSet, clearStorageCache } from "../lib/storage";
+import { ACCOUNTING_PL_BY_MONTH } from "../lib/accounting";
+import { supabase } from "../lib/supabaseClient";
 import { BACKUP_VERSION, cryptoId, normalizeBackup, normalizeDateOnly } from "../lib/validators";
 import { calculateMonthlyFinance, calculateAccumulatedCash } from "../lib/finance";
 import { getMonthlyStatistics, getAnnualStatistics } from "../lib/statistics";
@@ -137,6 +139,8 @@ export default function App() {
   const [notaModal,setNotaModal]=useState(null);
   const [drillModal,setDrillModal]=useState(null);
   const [showSettings,setShowSettings]=useState(false);
+  const [showTaxation,setShowTaxation]=useState(false);
+  const [accountActionBusy,setAccountActionBusy]=useState(false);
   const importFileRef = useRef(null);
   const [hideVal,setHideVal]=useState(false);
   const [toast,setToast]=useState(null);
@@ -151,8 +155,17 @@ export default function App() {
       const pm=await sGet("pj_plm")||{};
       const ct=await sGet("pj_ctb")||{};
       const irrf=await sGet("pj_irrf")||{};
-      setFavs(fv); setCtbMap(ct); setIrrfMap(irrf); setPlManual(pm);
-      const updated=await cascadePL(t,pm);
+      // Os valores da contabilidade são semeados apenas em um estado
+      // já existente do usuário. Assim, "Excluir Todos os Dados" realmente
+      // deixa a conta sem dados e não recria valores automaticamente.
+      const seededPL = t.length > 0
+        ? { ...ACCOUNTING_PL_BY_MONTH, ...pm }
+        : pm;
+      if (t.length > 0 && JSON.stringify(seededPL) !== JSON.stringify(pm)) {
+        await sSet("pj_plm", seededPL);
+      }
+      setFavs(fv); setCtbMap(ct); setIrrfMap(irrf); setPlManual(seededPL);
+      const updated=await cascadePL(t,seededPL);
       setTxs(t); setPlMap(updated);
     })();
   },[]);
@@ -160,11 +173,14 @@ export default function App() {
   const plKey=`${year}-${String(month+1).padStart(2,"0")}`;
 
   useEffect(() => {
-    // Necessário para sincronizar o campo de entrada com o mês selecionado.
-    // O valor é derivado de estado persistido e precisa atualizar quando o mês/mapa muda.
+    // O pró-labore informado pela contabilidade tem prioridade sobre o
+    // cálculo automático quando ainda não existe um override manual do usuário.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setPlIn(storedMoneyInput(plMap[plKey]));
-  }, [plKey, plMap]);
+    const value = Object.prototype.hasOwnProperty.call(plManual, plKey)
+      ? plManual[plKey]
+      : plMap[plKey];
+    setPlIn(storedMoneyInput(value));
+  }, [plKey, plMap, plManual]);
 
   useEffect(() => {
     // Necessário para sincronizar o campo de entrada com o mês selecionado.
@@ -185,7 +201,11 @@ export default function App() {
   const despesas = financeMonth.despesas;
   const resultado = financeMonth.resultado;
 
-  const tributacao = calcTributacao(txs, plMap, year, month, receitas);
+  // Mapa efetivo do pró-labore: valores da contabilidade corrigem os meses
+  // informados, enquanto um override manual do usuário continua tendo prioridade.
+  const effectivePlMap = { ...plMap, ...plManual };
+
+  const tributacao = calcTributacao(txs, effectivePlMap, year, month, receitas);
   const {
     rbt12,
     mesesAtividade,
@@ -198,7 +218,7 @@ export default function App() {
   const DAS = tributacao.das;
   const aliq = tributacao.aliquota;
 
-  const PLauto = calcRecommendedPL(txs, plMap, year, month);
+  const PLauto = calcRecommendedPL(txs, effectivePlMap, year, month);
   const hasManualPL = Object.prototype.hasOwnProperty.call(plManual, plKey);
   const PLef = hasManualPL
     ? Math.max(0, Number(plManual[plKey]) || 0)
@@ -231,6 +251,7 @@ export default function App() {
       .map(t => new Date(t.data + "T12:00:00").getFullYear())
       .filter(Number.isFinite),
     ...Object.keys(plMap || {}).map(k => Number(String(k).slice(0, 4))).filter(Number.isFinite),
+    ...Object.keys(ACCOUNTING_PL_BY_MONTH).map(k => Number(String(k).slice(0, 4))).filter(Number.isFinite),
     ...Object.keys(ctbMap || {}).map(k => Number(String(k).slice(0, 4))).filter(Number.isFinite),
     ...Object.keys(irrfMap || {}).map(k => Number(String(k).slice(0, 4))).filter(Number.isFinite),
   ])].sort((a, b) => b - a);
@@ -257,7 +278,7 @@ export default function App() {
       const newManual={...plManual}; delete newManual[plKey];
       setPlManual(newManual); await sSet("pj_plm",newManual);
       const up=await cascadePL(txs,newManual);
-      setPlMap(up); notify("Voltou ao valor automático.");
+      setPlMap(up); notify("Voltou ao valor da contabilidade/automático.");
       return;
     }
     const v=parseBRL(raw);
@@ -298,7 +319,6 @@ export default function App() {
     setShowForm(false); notify(editId?"Atualizado!":"Salvo!");
   };
   const delTx=async id=>{await saveTxs(txs.filter(t=>t.id!==id));notify("Removido.");};
-  const delFav=async id=>{await saveFavs(favs.filter(f=>f.id!==id));notify("Favorito removido.");};
   const applyFav=fav=>{
     if(fav.tipo==="receita") setForm(f=>({...f,nome:fav.nome,cnpj:fav.cnpj||"",telefone:fav.telefone||"",cep:fav.cep||"",endereco:fav.endereco||"",email:fav.email||"",especialidade:fav.especialidade||"",categoria:fav.categoria||""}));
     else setForm(f=>({...f,categoria:fav.nome}));
@@ -580,7 +600,9 @@ export default function App() {
 
   const favsAtt=formTipo==="receita"?favs.filter(f=>f.tipo==="receita"):favs.filter(f=>f.tipo==="despesa");
   const fmtV=v=>hideVal?"R$ ···":fmtBRL(v);
-  const nav=[{id:"dashboard",label:"Início",icon:"◎"},{id:"lancamentos",label:"Lançamentos",icon:"≡"},{id:"favoritos",label:"Favoritos",icon:"♡"},{id:"estatistica",label:"Estatística",icon:"◑"},{id:"anual",label:"Anual",icon:"▦"}];
+  const openTaxation=()=>setShowTaxation(true);
+  const goToTaxation=()=>{ setTab("dashboard"); setShowTaxation(true); };
+  const nav=[{id:"dashboard",label:"Início",icon:"◎"},{id:"lancamentos",label:"Lançamentos",icon:"≡"},{id:"estatistica",label:"Estatística",icon:"◑"},{id:"anual",label:"Anual",icon:"▦"},{id:"mais",label:"Mais",icon:"⋯",action:goToTaxation}];
 
   /* ══ RENDER ══════════════════════════════════════════════ */
   return (
@@ -613,12 +635,8 @@ export default function App() {
           <DashTab
             monthTxs={monthTxs} receitas={receitas} despesas={despesas} resultado={resultado}
             saldo={saldo} month={month} year={year} MONTHS={MONTHS}
-            DAS={DAS} aliq={aliq} rbt12={rbt12} mesesR={mesesR}
-            PLauto={PLauto} PLef={PLef} plIn={plIn} setPlIn={setPlIn} commitPL={commitPL}
-            INSS={INSS} CTB={CTB} ctbIn={ctbIn} setCtbIn={setCtbIn} commitCtb={commitCtb}
-            IRRFauto={IRRFauto} IRRFef={IRRFef} irrfIn={irrfIn} setIrrfIn={setIrrfIn} commitIrrf={commitIrrf}
-            totalObrig={totalObrig} C={C} fmtBRL={fmtBRL} fmtIn={fmtIn}
-            setNotaModal={setNotaModal} openEdit={openEdit}
+            totalObrig={totalObrig} C={C} fmtBRL={fmtBRL} openTaxation={openTaxation}
+            setNotaModal={setNotaModal}
           />
         )}
 
@@ -631,14 +649,9 @@ export default function App() {
           />
         )}
 
-        {/* ── FAVORITOS ── */}
-        {tab==="favoritos" && (
-          <FavTab favs={favs} delFav={delFav} openNew={openNew} applyFav={applyFav} C={C} />
-        )}
-
         {/* ── ESTATÍSTICA ── */}
         {tab==="anual" && (
-          <AnualTab txs={txs} plMap={plMap} irrfMap={irrfMap} year={year} C={C} fmtBRL={fmtBRL} calcIRRF={calcIRRF}/>
+          <AnualTab txs={txs} plMap={effectivePlMap} irrfMap={irrfMap} year={year} C={C} fmtBRL={fmtBRL} calcIRRF={calcIRRF}/>
         )}
 
         {tab==="estatistica" && (
@@ -654,7 +667,7 @@ export default function App() {
       {/* Bottom Nav */}
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:"rgba(248,245,241,0.97)",backdropFilter:"blur(14px)",borderTop:`1px solid ${C.border}`,display:"flex",paddingBottom:16,zIndex:40}}>
         {nav.map(n=>(
-          <button key={n.id} onClick={()=>setTab(n.id)} style={{flex:1,background:"none",border:"none",padding:"12px 0 4px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+          <button key={n.id} onClick={()=>n.action?n.action():setTab(n.id)} style={{flex:1,background:"none",border:"none",padding:"12px 0 4px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
             <span style={{fontSize:20,color:tab===n.id?C.navyMid:"#AAA"}}>{n.icon}</span>
             <span style={{fontSize:10,fontFamily:"inherit",color:tab===n.id?C.navyMid:"#AAA",fontWeight:tab===n.id?"bold":"normal"}}>{n.label}</span>
           </button>
@@ -854,6 +867,73 @@ export default function App() {
         </Modal>
       )}
 
+      {/* Taxation Modal */}
+      {showTaxation && (
+        <Modal onClose={()=>setShowTaxation(false)}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+            <div>
+              <h2 style={{margin:0,fontSize:18,color:C.navy,fontWeight:"normal"}}>Tributação</h2>
+              <p style={{margin:"4px 0 0",fontSize:11,color:C.muted}}>{MONTHS[month]} {year}</p>
+            </div>
+            <CloseBtn onClick={()=>setShowTaxation(false)}/>
+          </div>
+          <Card style={{boxShadow:"none",border:`1px solid ${C.border}`}}>
+            <SmLabel style={{marginBottom:16}}>Impostos &amp; Obrigações</SmLabel>
+            <div style={{paddingBottom:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                <div><p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>DAS — Simples Nacional</p><p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>Alíquota efetiva: {(aliq*100).toFixed(2)}% (Anexo {anexo})</p></div>
+                <p style={{margin:0,fontSize:16,fontWeight:"bold",color:"#E67E22"}}>{fmtBRL(DAS)}</p>
+              </div>
+              <div style={{background:"#FFFBF0",borderRadius:10,padding:"8px 12px",border:"1px solid #F0E0A0"}}>
+                <p style={{margin:0,fontSize:11,color:"#7A5800",lineHeight:1.5}}>📊 RBT12 considerado: <b>{fmtBRL(rbt12)}</b>{mesesR<13&&<span><br/>📈 Regra de início de atividade · {mesesR} {mesesR===1?"mês":"meses"}</span>}</p>
+              </div>
+            </div>
+            <Div/>
+            <div style={{paddingBottom:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                <div><p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>Pró-labore</p><p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>Fator R: {(fatorR*100).toFixed(2)}% · conforme contabilidade</p></div>
+                <p style={{margin:0,fontSize:15,fontWeight:"bold",color:C.navyMid}}>{fmtBRL(PLef)}</p>
+              </div>
+              <MoneyIn value={plIn||fmtIn(String(Math.round(PLef*100)))} onChange={setPlIn} onBlur={commitPL} placeholder={fmtIn(String(Math.round(PLauto*100)))}/>
+              <div style={{background:C.navyLight,borderRadius:10,padding:"8px 12px",marginTop:8}}>
+                <p style={{margin:0,fontSize:11,color:C.navyMid,lineHeight:1.5}}>🔒 Automático: pró-labore planejado para levar o próximo Fator R a ≥ 28%, considerando folha + CPP · Deixe em branco para usar o valor automático</p>
+              </div>
+            </div>
+            <Div/>
+            <div style={{paddingBottom:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <div><p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>INSS do Sócio 🔒</p><p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>11% sobre {fmtBRL(PLef)} · automático</p></div>
+                <p style={{margin:0,fontSize:16,fontWeight:"bold",color:"#8E44AD"}}>{fmtBRL(INSS)}</p>
+              </div>
+            </div>
+            <Div/>
+            <div style={{paddingBottom:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                <div><p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>Contabilidade</p><p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>Custo mensal do contador</p></div>
+                {CTB>0&&<p style={{margin:0,fontSize:14,fontWeight:"bold",color:"#2980B9"}}>{fmtBRL(CTB)}</p>}
+              </div>
+              <MoneyIn value={ctbIn} onChange={setCtbIn} onBlur={commitCtb} placeholder="0,00"/>
+            </div>
+            <Div/>
+            <div style={{paddingBottom:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                <div><p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>IRRF</p><p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>Tabela progressiva 2026 · base: pró-labore − INSS</p></div>
+                <p style={{margin:0,fontSize:14,fontWeight:"bold",color:"#C0392B"}}>{fmtBRL(IRRFef)}</p>
+              </div>
+              <MoneyIn value={irrfIn||fmtIn(String(Math.round(IRRFef*100)))} onChange={setIrrfIn} onBlur={commitIrrf} placeholder={fmtIn(String(Math.round(IRRFauto*100)))}/>
+              <div style={{background:"#FFF5F5",borderRadius:10,padding:"8px 12px",marginTop:8}}>
+                <p style={{margin:0,fontSize:11,color:"#C0392B",lineHeight:1.6}}>🔒 Tabela 2026 + Lei 15.270/25 · isento até R$ 5.000 · redutor R$ 5.000–7.350 · acima R$ 7.350 tabela normal<br/>Sugestão: {fmtBRL(IRRFauto)}</p>
+              </div>
+            </div>
+            <Div/>
+            <div style={{paddingTop:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <p style={{margin:0,fontSize:14,fontWeight:"700",color:C.text}}>Total de Obrigações</p>
+              <p style={{margin:0,fontSize:18,fontWeight:"bold",color:C.red}}>{fmtBRL(totalObrig)}</p>
+            </div>
+          </Card>
+        </Modal>
+      )}
+
       {/* Settings Modal */}
       {showSettings && (
         <Modal onClose={()=>setShowSettings(false)}>
@@ -888,6 +968,62 @@ export default function App() {
             style={{display:"none"}}
           />
 
+          <div style={{borderTop:`1px solid ${C.border}`,marginTop:16,paddingTop:16}}>
+            <SmLabel style={{marginBottom:10}}>Dados da conta</SmLabel>
+            <div style={{display:"grid",gap:10}}>
+              <button
+                disabled={accountActionBusy}
+                onClick={async()=>{
+                  if(accountActionBusy) return;
+                  const confirmed=window.confirm("Excluir todos os dados do aplicativo?\n\nIsso removerá os lançamentos, favoritos, pró-labore, contabilidade e IRRF da nuvem e deste dispositivo. Sua conta continuará ativa.");
+                  if(!confirmed) return;
+                  setAccountActionBusy(true);
+                  try{
+                    await deleteAllAppData();
+                    setTxs([]); setFavs([]); setPlMap({}); setPlManual({}); setCtbMap({}); setIrrfMap({});
+                    setShowSettings(false);
+                    notify("Todos os dados foram excluídos.","ok");
+                  }catch(e){
+                    notify(e?.message||"Não foi possível excluir os dados.","err");
+                  }finally{
+                    setAccountActionBusy(false);
+                  }
+                }}
+                style={{width:"100%",background:"white",border:`1px solid ${C.border}`,borderRadius:14,padding:"14px 16px",color:C.red,fontFamily:"inherit",fontSize:14,fontWeight:"700",cursor:accountActionBusy?"wait":"pointer",textAlign:"left",opacity:accountActionBusy?0.6:1}}
+              >
+                <div style={{fontSize:15,marginBottom:3}}>🗑️ Excluir Todos os Dados</div>
+                <div style={{fontSize:11,fontWeight:"normal",color:C.muted,lineHeight:1.45}}>Remove os dados do aplicativo, mas mantém sua conta.</div>
+              </button>
+
+              <button
+                disabled={accountActionBusy}
+                onClick={async()=>{
+                  if(accountActionBusy) return;
+                  const confirmed=window.confirm("Excluir sua conta permanentemente?\n\nA conta de autenticação e os dados associados serão apagados. Esta ação não pode ser desfeita.");
+                  if(!confirmed) return;
+                  const second=window.confirm("Confirma novamente a exclusão PERMANENTE da conta?");
+                  if(!second) return;
+                  setAccountActionBusy(true);
+                  try{
+                    const {error}=await supabase.functions.invoke("delete-account");
+                    if(error) throw error;
+                    await clearStorageCache();
+                    try{ await supabase.auth.signOut(); }catch{}
+                    window.location.reload();
+                  }catch(e){
+                    notify(e?.message||"Não foi possível excluir a conta.","err");
+                  }finally{
+                    setAccountActionBusy(false);
+                  }
+                }}
+                style={{width:"100%",background:C.redLight,border:`1px solid ${C.red}`,borderRadius:14,padding:"14px 16px",color:C.red,fontFamily:"inherit",fontSize:14,fontWeight:"700",cursor:accountActionBusy?"wait":"pointer",textAlign:"left",opacity:accountActionBusy?0.6:1}}
+              >
+                <div style={{fontSize:15,marginBottom:3}}>⚠️ Excluir Conta</div>
+                <div style={{fontSize:11,fontWeight:"normal",color:C.red,lineHeight:1.45}}>Exclui permanentemente a conta e os dados associados.</div>
+              </button>
+            </div>
+          </div>
+
           <div style={{background:"#FFF8F0",borderRadius:12,padding:"11px 13px",marginTop:14}}>
             <p style={{margin:0,fontSize:11,color:"#8A5A20",lineHeight:1.55}}>
               Os dados importados passam pela validação do aplicativo antes de substituir os dados atuais.
@@ -903,8 +1039,7 @@ export default function App() {
 }
 
 /* ─── Tab Components ─────────────────────────────── */
-function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,MONTHS,DAS,aliq,anexo,fatorR,rbt12,mesesR,PLauto,PLef,plIn,setPlIn,commitPL,INSS,CTB,ctbIn,setCtbIn,commitCtb,IRRFauto,IRRFef,irrfIn,setIrrfIn,commitIrrf,totalObrig,C,fmtBRL,fmtIn,setNotaModal,openEdit}){
-  const recMes=monthTxs.filter(t=>t.tipo==="receita");
+function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,MONTHS,totalObrig,C,fmtBRL,setNotaModal,openTaxation}){
   return(<>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
       <Card><SmLabel>Receita</SmLabel><BigVal color={C.navyMid}>{fmtBRL(receitas)}</BigVal></Card>
@@ -925,61 +1060,14 @@ function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,MONTHS,D
         </div>
       </div>
     </Card>
-    <Card style={{marginBottom:12}}>
-      <SmLabel style={{marginBottom:16}}>Impostos &amp; Obrigações</SmLabel>
-      <div style={{paddingBottom:14}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
-          <div><p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>DAS — Simples Nacional</p><p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>Alíquota efetiva: {(aliq*100).toFixed(2)}% (Anexo {anexo})</p></div>
-          <p style={{margin:0,fontSize:16,fontWeight:"bold",color:"#E67E22"}}>{fmtBRL(DAS)}</p>
+    <Card id="obrigacoes-mensais" style={{marginBottom:12}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:14}}>
+        <div style={{minWidth:0}}>
+          <p style={{margin:0,fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase"}}>Obrigações do mês</p>
+          <p style={{margin:"6px 0 0",fontSize:26,fontWeight:"bold",color:C.navyMid,letterSpacing:-0.7}}>{fmtBRL(totalObrig)}</p>
+          <p style={{margin:"5px 0 0",fontSize:11,color:C.muted,lineHeight:1.45}}>DAS + INSS + IRRF + contabilidade</p>
         </div>
-        <div style={{background:"#FFFBF0",borderRadius:10,padding:"8px 12px",border:"1px solid #F0E0A0"}}>
-          <p style={{margin:0,fontSize:11,color:"#7A5800",lineHeight:1.5}}>📊 RBT12 considerado: <b>{fmtBRL(rbt12)}</b>{mesesR<13&&<span><br/>📈 Regra de início de atividade · {mesesR} {mesesR===1?"mês":"meses"}</span>}</p>
-        </div>
-      </div>
-      <Div/>
-      <div style={{paddingBottom:14}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
-          <div><p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>Pró-labore</p><p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>Fator R: {(fatorR*100).toFixed(2)}% · editável</p></div>
-          <p style={{margin:0,fontSize:15,fontWeight:"bold",color:C.navyMid}}>{fmtBRL(PLef)}</p>
-        </div>
-        <MoneyIn value={plIn||fmtIn(String(Math.round(PLef*100)))} onChange={setPlIn} onBlur={commitPL} placeholder={fmtIn(String(Math.round(PLauto*100)))}/>
-        <div style={{background:C.navyLight,borderRadius:10,padding:"8px 12px",marginTop:8}}>
-          <p style={{margin:0,fontSize:11,color:C.navyMid,lineHeight:1.5}}>🔒 Automático: pró-labore planejado para levar o próximo Fator R a ≥ 28%, considerando folha + CPP · Deixe em branco para usar o valor automático</p>
-        </div>
-      </div>
-      <Div/>
-      <div style={{paddingBottom:14}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-          <div><p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>INSS do Sócio 🔒</p><p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>11% sobre {fmtBRL(PLef)} · automático</p></div>
-          <p style={{margin:0,fontSize:16,fontWeight:"bold",color:"#8E44AD"}}>{fmtBRL(INSS)}</p>
-        </div>
-      </div>
-      <Div/>
-      <div style={{paddingBottom:14}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
-          <div><p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>Contabilidade</p><p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>Custo mensal do contador</p></div>
-          {CTB>0&&<p style={{margin:0,fontSize:14,fontWeight:"bold",color:"#2980B9"}}>{fmtBRL(CTB)}</p>}
-        </div>
-        <MoneyIn value={ctbIn} onChange={setCtbIn} onBlur={commitCtb} placeholder="0,00"/>
-      </div>
-      <Div/>
-      <div style={{paddingBottom:14}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
-          <div>
-            <p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>IRRF</p>
-            <p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>Tabela progressiva 2025 · base: pró-labore − INSS</p>
-          </div>
-          <p style={{margin:0,fontSize:14,fontWeight:"bold",color:"#C0392B"}}>{fmtBRL(IRRFef)}</p>
-        </div>
-        <MoneyIn value={irrfIn||fmtIn(String(Math.round(IRRFef*100)))} onChange={setIrrfIn} onBlur={commitIrrf} placeholder={fmtIn(String(Math.round(IRRFauto*100)))}/>
-        <div style={{background:"#FFF5F5",borderRadius:10,padding:"8px 12px",marginTop:8}}>
-          <p style={{margin:0,fontSize:11,color:"#C0392B",lineHeight:1.6}}>🔒 Tabela 2026 + Lei 15.270/25 · isento até R$ 5.000 · redutor R$ 5.000–7.350 · acima R$ 7.350 tabela normal<br/>Sugestão: {fmtBRL(IRRFauto)}</p>
-        </div>
-      </div>
-      <Div/>
-      <div style={{paddingTop:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <p style={{margin:0,fontSize:14,fontWeight:"700",color:C.text}}>Total de Obrigações</p>
-        <p style={{margin:0,fontSize:18,fontWeight:"bold",color:C.red}}>{fmtBRL(totalObrig)}</p>
+        <button onClick={openTaxation} style={{background:"none",border:"none",padding:0,marginTop:10,color:C.navyMid,fontFamily:"inherit",fontSize:13,fontWeight:"700",cursor:"pointer",whiteSpace:"nowrap"}}>Ver Tributação ›</button>
       </div>
     </Card>
     {(()=>{
@@ -1037,33 +1125,6 @@ function LancTab({monthTxs,receitas,despesas,resultado,month,year,MONTHS,C,fmtBR
         </div>
       </div>
       :monthTxs.map(tx=><TxCard key={tx.id} tx={tx} onEdit={openEdit} onDelete={delTx} C={C} fmtBRL={fmtBRL} MONTHS={MONTHS}/>)
-    }
-  </>);
-}
-
-function FavTab({favs,delFav,openNew,applyFav,C}){
-  const tipos=[...new Set(favs.map(f=>f.tipo))];
-  return(<>
-    <p style={{margin:"0 0 12px",fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase"}}>Favoritos Salvos</p>
-    {favs.length===0
-      ?<div style={{background:"white",borderRadius:18,padding:"40px 20px",textAlign:"center",border:"1px dashed #E0D8CE"}}>
-        <p style={{fontSize:36,margin:0}}>⭐</p>
-        <p style={{margin:"8px 0 0",fontSize:14,color:"#CCC"}}>Salve receitas e despesas ao criar lançamentos</p>
-      </div>
-      :tipos.map(tipo=>(
-        <div key={tipo} style={{marginBottom:16}}>
-          <p style={{margin:"0 0 8px",fontSize:10,color:tipo==="receita"?C.navyMid:C.red,letterSpacing:2,textTransform:"uppercase",fontWeight:"bold"}}>{tipo==="receita"?"💰 Receitas":"💸 Despesas"}</p>
-          {favs.filter(f=>f.tipo===tipo).map(fav=>(
-            <div key={fav.id} style={{background:"white",borderRadius:16,padding:"13px 16px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",boxShadow:"0 1px 8px rgba(0,0,0,0.05)",borderLeft:`3px solid ${tipo==="receita"?C.navyMid:C.red}`}}>
-              <div><p style={{margin:0,fontWeight:"600",color:C.text,fontSize:14}}>{fav.nome}</p>{fav.cnpj&&<p style={{margin:"2px 0 0",fontSize:11,color:"#BBB",fontFamily:"monospace"}}>{fav.cnpj}</p>}</div>
-              <div style={{display:"flex",gap:8}}>
-                <button onClick={()=>{openNew(tipo);setTimeout(()=>applyFav(fav),30);}} style={{background:tipo==="receita"?C.navyLight:C.redLight,border:"none",borderRadius:10,padding:"8px 14px",color:tipo==="receita"?C.navyMid:C.red,fontSize:12,fontFamily:"inherit",cursor:"pointer",fontWeight:"600"}}>Usar</button>
-                <button onClick={()=>delFav(fav.id)} style={{background:"#F5F5F0",border:"none",borderRadius:10,padding:"8px 12px",color:"#AAA",fontSize:14,cursor:"pointer"}}>✕</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      ))
     }
   </>);
 }
