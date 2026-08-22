@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useRef } from "react";
 import { deleteAllAppData, sGet, sSet, clearStorageCache } from "../lib/storage";
+import { updatePassword as authUpdatePassword, validatePassword } from "../lib/auth";
 import { ACCOUNTING_PL_BY_MONTH } from "../lib/accounting";
 import { supabase } from "../lib/supabaseClient";
 import { BACKUP_VERSION, cryptoId, normalizeBackup, normalizeDateOnly } from "../lib/validators";
@@ -139,6 +140,10 @@ export default function App() {
   const [notaModal,setNotaModal]=useState(null);
   const [drillModal,setDrillModal]=useState(null);
   const [showSettings,setShowSettings]=useState(false);
+  const [showPasswordModal,setShowPasswordModal]=useState(false);
+  const [newPassword,setNewPassword]=useState("");
+  const [newPasswordConfirm,setNewPasswordConfirm]=useState("");
+  const [passwordBusy,setPasswordBusy]=useState(false);
   const [showTaxation,setShowTaxation]=useState(false);
   const [accountActionBusy,setAccountActionBusy]=useState(false);
   const importFileRef = useRef(null);
@@ -603,6 +608,30 @@ export default function App() {
   const openTaxation=()=>setShowTaxation(true);
   const goToTaxation=()=>{ setTab("dashboard"); setShowTaxation(true); };
   const nav=[{id:"dashboard",label:"Início",icon:"◎"},{id:"lancamentos",label:"Lançamentos",icon:"≡"},{id:"estatistica",label:"Estatística",icon:"◑"},{id:"anual",label:"Anual",icon:"▦"},{id:"mais",label:"Mais",icon:"⋯",action:goToTaxation}];
+  const closePasswordModal=()=>{
+    if(passwordBusy) return;
+    setShowPasswordModal(false);
+    setNewPassword("");
+    setNewPasswordConfirm("");
+  };
+
+  const handlePasswordChange=async()=>{
+    if(passwordBusy) return;
+    try{
+      const password=validatePassword(newPassword, "A nova senha precisa ter pelo menos 8 caracteres.");
+      if(password!==newPasswordConfirm){
+        throw new Error("As senhas não coincidem.");
+      }
+      setPasswordBusy(true);
+      await authUpdatePassword(password);
+      closePasswordModal();
+      notify("Senha alterada com sucesso.","ok");
+    }catch(e){
+      notify(e?.message||"Não foi possível alterar a senha.","err");
+    }finally{
+      setPasswordBusy(false);
+    }
+  };
 
   /* ══ RENDER ══════════════════════════════════════════════ */
   return (
@@ -622,7 +651,10 @@ export default function App() {
           <select value={year} onChange={e=>setYear(+e.target.value)} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.2)",borderRadius:10,color:"#F0EBE3",padding:"8px 10px",fontSize:13,fontFamily:"inherit",width:78,outline:"none"}}>
             {allYears.map(y=><option key={y} value={y} style={{background:"#1A3055"}}>{y}</option>)}
           </select>
-          <button onClick={()=>setShowSettings(true)} aria-label="Configurações" style={{background:"rgba(200,169,110,0.2)",border:"1px solid rgba(200,169,110,0.5)",borderRadius:10,padding:"8px 12px",color:"#C8A96E",fontSize:16,cursor:"pointer",flexShrink:0,zIndex:10}}>⚙️</button>
+          <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+            <button onClick={()=>setHideVal(v=>!v)} aria-label={hideVal?"Mostrar valores":"Ocultar valores"} title={hideVal?"Mostrar valores":"Ocultar valores"} style={{background:hideVal?"rgba(200,169,110,0.3)":"rgba(255,255,255,0.1)",border:`1px solid ${hideVal?"rgba(200,169,110,0.6)":"rgba(255,255,255,0.2)"}`,borderRadius:10,padding:"8px 10px",color:hideVal?"#C8A96E":"#F0EBE3",fontSize:15,cursor:"pointer",zIndex:10}}>{hideVal?"👁":"🙈"}</button>
+            <button onClick={()=>setShowSettings(true)} aria-label="Configurações" style={{background:"rgba(200,169,110,0.2)",border:"1px solid rgba(200,169,110,0.5)",borderRadius:10,padding:"8px 12px",color:"#C8A96E",fontSize:16,cursor:"pointer",zIndex:10}}>⚙️</button>
+          </div>
         </div>
         <div style={{height:2,background:"linear-gradient(90deg,transparent,#C8A96E,transparent)"}}/>
       </div>
@@ -635,7 +667,7 @@ export default function App() {
           <DashTab
             monthTxs={monthTxs} receitas={receitas} despesas={despesas} resultado={resultado}
             saldo={saldo} month={month} year={year} MONTHS={MONTHS}
-            totalObrig={totalObrig} C={C} fmtBRL={fmtBRL} openTaxation={openTaxation}
+            totalObrig={totalObrig} C={C} fmtBRL={fmtV} openTaxation={openTaxation}
             setNotaModal={setNotaModal}
           />
         )}
@@ -644,22 +676,22 @@ export default function App() {
         {tab==="lancamentos" && (
           <LancTab
             monthTxs={monthTxs} receitas={receitas} despesas={despesas} resultado={resultado}
-            month={month} year={year} MONTHS={MONTHS} C={C} fmtBRL={fmtBRL}
+            month={month} year={year} MONTHS={MONTHS} C={C} fmtBRL={fmtV}
             openNew={openNew} openEdit={openEdit} delTx={delTx}
           />
         )}
 
         {/* ── ESTATÍSTICA ── */}
         {tab==="anual" && (
-          <AnualTab txs={txs} plMap={effectivePlMap} irrfMap={irrfMap} year={year} C={C} fmtBRL={fmtBRL} calcIRRF={calcIRRF}/>
+          <AnualTab txs={txs} plMap={effectivePlMap} irrfMap={irrfMap} year={year} C={C} fmtBRL={fmtV} calcIRRF={calcIRRF}/>
         )}
 
         {tab==="estatistica" && (
           <StatTab
             monthTxs={monthTxs} receitas={receitas} despesas={despesas}
             month={month} year={year} MONTHS={MONTHS} C={C}
-            fmtV={fmtV} hideVal={hideVal} setHideVal={setHideVal}
-            setDrillModal={setDrillModal} fmtBRL={fmtBRL}
+            fmtV={fmtV}
+            setDrillModal={setDrillModal} fmtBRL={fmtV}
           />
         )}
       </div>
@@ -830,7 +862,7 @@ export default function App() {
                           {isEmit&&<span style={{fontSize:11,background:tx.informadoContab?"#EAFAF1":"#FFF0EE",color:tx.informadoContab?"#27AE60":C.red,borderRadius:6,padding:"2px 8px",fontWeight:"600"}}>{tx.informadoContab?"✅ Enviada":"⏳ Não enviada"}</span>}
                         </div>
                       </div>
-                      <p style={{margin:0,fontSize:15,fontWeight:"bold",color:cfg.color,flexShrink:0,marginLeft:12}}>{fmtBRL(tx.valor)}</p>
+                      <p style={{margin:0,fontSize:15,fontWeight:"bold",color:cfg.color,flexShrink:0,marginLeft:12}}>{fmtV(tx.valor)}</p>
                     </div>
                   </div>
                 );
@@ -845,7 +877,7 @@ export default function App() {
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
             <div>
               <p style={{margin:0,fontSize:16,fontWeight:"600",color:C.navy}}>{drillModal.title}</p>
-              <p style={{margin:"3px 0 0",fontSize:11,color:C.muted}}>{drillModal.items.length} lançamentos · {fmtBRL(drillModal.items.reduce((s,t)=>s+t.valor,0))}</p>
+              <p style={{margin:"3px 0 0",fontSize:11,color:C.muted}}>{drillModal.items.length} lançamentos · {fmtV(drillModal.items.reduce((s,t)=>s+t.valor,0))}</p>
             </div>
             <CloseBtn onClick={()=>setDrillModal(null)}/>
           </div>
@@ -859,7 +891,7 @@ export default function App() {
                     {tx.especialidade&&<p style={{margin:"1px 0 0",fontSize:11,color:C.gold,fontWeight:"600"}}>{tx.especialidade}{tx.dente?" · Dente "+tx.dente:""}</p>}
                     <p style={{margin:"3px 0 0",fontSize:11,color:C.muted}}>{d.getDate().toString().padStart(2,"0")}/{(d.getMonth()+1).toString().padStart(2,"0")}/{d.getFullYear()}</p>
                   </div>
-                  <p style={{margin:0,fontSize:15,fontWeight:"bold",color:isR?C.navyMid:C.red}}>{isR?"+":"-"}{fmtBRL(tx.valor)}</p>
+                  <p style={{margin:0,fontSize:15,fontWeight:"bold",color:isR?C.navyMid:C.red}}>{isR?"+":"-"}{fmtV(tx.valor)}</p>
                 </div>
               </div>
             );
@@ -882,17 +914,17 @@ export default function App() {
             <div style={{paddingBottom:14}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
                 <div><p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>DAS — Simples Nacional</p><p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>Alíquota efetiva: {(aliq*100).toFixed(2)}% (Anexo {anexo})</p></div>
-                <p style={{margin:0,fontSize:16,fontWeight:"bold",color:"#E67E22"}}>{fmtBRL(DAS)}</p>
+                <p style={{margin:0,fontSize:16,fontWeight:"bold",color:"#E67E22"}}>{fmtV(DAS)}</p>
               </div>
               <div style={{background:"#FFFBF0",borderRadius:10,padding:"8px 12px",border:"1px solid #F0E0A0"}}>
-                <p style={{margin:0,fontSize:11,color:"#7A5800",lineHeight:1.5}}>📊 RBT12 considerado: <b>{fmtBRL(rbt12)}</b>{mesesR<13&&<span><br/>📈 Regra de início de atividade · {mesesR} {mesesR===1?"mês":"meses"}</span>}</p>
+                <p style={{margin:0,fontSize:11,color:"#7A5800",lineHeight:1.5}}>📊 RBT12 considerado: <b>{fmtV(rbt12)}</b>{mesesR<13&&<span><br/>📈 Regra de início de atividade · {mesesR} {mesesR===1?"mês":"meses"}</span>}</p>
               </div>
             </div>
             <Div/>
             <div style={{paddingBottom:14}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
                 <div><p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>Pró-labore</p><p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>Fator R: {(fatorR*100).toFixed(2)}% · conforme contabilidade</p></div>
-                <p style={{margin:0,fontSize:15,fontWeight:"bold",color:C.navyMid}}>{fmtBRL(PLef)}</p>
+                <p style={{margin:0,fontSize:15,fontWeight:"bold",color:C.navyMid}}>{fmtV(PLef)}</p>
               </div>
               <MoneyIn value={plIn||fmtIn(String(Math.round(PLef*100)))} onChange={setPlIn} onBlur={commitPL} placeholder={fmtIn(String(Math.round(PLauto*100)))}/>
               <div style={{background:C.navyLight,borderRadius:10,padding:"8px 12px",marginTop:8}}>
@@ -902,15 +934,15 @@ export default function App() {
             <Div/>
             <div style={{paddingBottom:14}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                <div><p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>INSS do Sócio 🔒</p><p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>11% sobre {fmtBRL(PLef)} · automático</p></div>
-                <p style={{margin:0,fontSize:16,fontWeight:"bold",color:"#8E44AD"}}>{fmtBRL(INSS)}</p>
+                <div><p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>INSS do Sócio 🔒</p><p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>11% sobre {fmtV(PLef)} · automático</p></div>
+                <p style={{margin:0,fontSize:16,fontWeight:"bold",color:"#8E44AD"}}>{fmtV(INSS)}</p>
               </div>
             </div>
             <Div/>
             <div style={{paddingBottom:14}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
                 <div><p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>Contabilidade</p><p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>Custo mensal do contador</p></div>
-                {CTB>0&&<p style={{margin:0,fontSize:14,fontWeight:"bold",color:"#2980B9"}}>{fmtBRL(CTB)}</p>}
+                {CTB>0&&<p style={{margin:0,fontSize:14,fontWeight:"bold",color:"#2980B9"}}>{fmtV(CTB)}</p>}
               </div>
               <MoneyIn value={ctbIn} onChange={setCtbIn} onBlur={commitCtb} placeholder="0,00"/>
             </div>
@@ -918,17 +950,17 @@ export default function App() {
             <div style={{paddingBottom:14}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
                 <div><p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>IRRF</p><p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>Tabela progressiva 2026 · base: pró-labore − INSS</p></div>
-                <p style={{margin:0,fontSize:14,fontWeight:"bold",color:"#C0392B"}}>{fmtBRL(IRRFef)}</p>
+                <p style={{margin:0,fontSize:14,fontWeight:"bold",color:"#C0392B"}}>{fmtV(IRRFef)}</p>
               </div>
               <MoneyIn value={irrfIn||fmtIn(String(Math.round(IRRFef*100)))} onChange={setIrrfIn} onBlur={commitIrrf} placeholder={fmtIn(String(Math.round(IRRFauto*100)))}/>
               <div style={{background:"#FFF5F5",borderRadius:10,padding:"8px 12px",marginTop:8}}>
-                <p style={{margin:0,fontSize:11,color:"#C0392B",lineHeight:1.6}}>🔒 Tabela 2026 + Lei 15.270/25 · isento até R$ 5.000 · redutor R$ 5.000–7.350 · acima R$ 7.350 tabela normal<br/>Sugestão: {fmtBRL(IRRFauto)}</p>
+                <p style={{margin:0,fontSize:11,color:"#C0392B",lineHeight:1.6}}>🔒 Tabela 2026 + Lei 15.270/25 · isento até R$ 5.000 · redutor R$ 5.000–7.350 · acima R$ 7.350 tabela normal<br/>Sugestão: {fmtV(IRRFauto)}</p>
               </div>
             </div>
             <Div/>
             <div style={{paddingTop:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <p style={{margin:0,fontSize:14,fontWeight:"700",color:C.text}}>Total de Obrigações</p>
-              <p style={{margin:0,fontSize:18,fontWeight:"bold",color:C.red}}>{fmtBRL(totalObrig)}</p>
+              <p style={{margin:0,fontSize:18,fontWeight:"bold",color:C.red}}>{fmtV(totalObrig)}</p>
             </div>
           </Card>
         </Modal>
@@ -967,6 +999,17 @@ export default function App() {
             onChange={handleImportFile}
             style={{display:"none"}}
           />
+
+          <div style={{borderTop:`1px solid ${C.border}`,marginTop:16,paddingTop:16}}>
+            <SmLabel style={{marginBottom:10}}>Segurança</SmLabel>
+            <button
+              onClick={()=>{setNewPassword("");setNewPasswordConfirm("");setShowPasswordModal(true);}}
+              style={{width:"100%",background:"white",border:`1px solid ${C.border}`,borderRadius:14,padding:"14px 16px",color:C.navyMid,fontFamily:"inherit",fontSize:14,fontWeight:"700",cursor:"pointer",textAlign:"left"}}
+            >
+              <div style={{fontSize:15,marginBottom:3}}>🔑 Alterar Senha</div>
+              <div style={{fontSize:11,fontWeight:"normal",color:C.muted,lineHeight:1.45}}>Defina uma nova senha para sua conta.</div>
+            </button>
+          </div>
 
           <div style={{borderTop:`1px solid ${C.border}`,marginTop:16,paddingTop:16}}>
             <SmLabel style={{marginBottom:10}}>Dados da conta</SmLabel>
@@ -1029,6 +1072,52 @@ export default function App() {
               Os dados importados passam pela validação do aplicativo antes de substituir os dados atuais.
             </p>
           </div>
+        </Modal>
+      )}
+
+      {/* Alterar Senha Modal */}
+      {showPasswordModal && (
+        <Modal onClose={closePasswordModal}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+            <h2 style={{margin:0,fontSize:18,color:C.navy,fontWeight:"normal"}}>🔑 Alterar Senha</h2>
+            <CloseBtn onClick={closePasswordModal}/>
+          </div>
+
+          <Field label="Nova senha">
+            <input
+              type="password"
+              value={newPassword}
+              onChange={e=>setNewPassword(e.target.value)}
+              autoComplete="new-password"
+              placeholder="Mínimo de 8 caracteres"
+              style={iSt}
+              disabled={passwordBusy}
+            />
+          </Field>
+
+          <Field label="Confirmar nova senha">
+            <input
+              type="password"
+              value={newPasswordConfirm}
+              onChange={e=>setNewPasswordConfirm(e.target.value)}
+              autoComplete="new-password"
+              placeholder="Digite novamente a nova senha"
+              style={iSt}
+              disabled={passwordBusy}
+            />
+          </Field>
+
+          <p style={{margin:"0 0 16px",fontSize:11,color:C.muted,lineHeight:1.5}}>
+            A nova senha deve ter pelo menos 8 caracteres.
+          </p>
+
+          <button
+            disabled={passwordBusy}
+            onClick={handlePasswordChange}
+            style={{width:"100%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,border:"none",borderRadius:14,padding:"15px",color:"white",fontFamily:"inherit",fontSize:14,fontWeight:"700",cursor:passwordBusy?"wait":"pointer",opacity:passwordBusy?0.65:1}}
+          >
+            {passwordBusy?"Alterando…":"Alterar Senha"}
+          </button>
         </Modal>
       )}
 
@@ -1129,16 +1218,13 @@ function LancTab({monthTxs,receitas,despesas,resultado,month,year,MONTHS,C,fmtBR
   </>);
 }
 
-function StatTab({monthTxs,receitas,despesas,month,year,MONTHS,C,fmtV,hideVal,setHideVal,setDrillModal,fmtBRL}){
+function StatTab({monthTxs,receitas,despesas,month,year,MONTHS,C,fmtV,setDrillModal,fmtBRL}){
   const stats=getMonthlyStatistics(monthTxs);
   const recMes=stats.receitas;
   const ECOLS={"Endodontia":C.navyMid,"Ortodontia":C.gold,"Outros":C.muted};
   return(<>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+    <div style={{display:"flex",alignItems:"center",marginBottom:12}}>
       <p style={{margin:0,fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase"}}>{MONTHS[month]} {year}</p>
-      <button onClick={()=>setHideVal(v=>!v)} style={{background:hideVal?C.navyMid:"white",border:`1.5px solid ${hideVal?C.navyMid:C.border}`,borderRadius:10,padding:"7px 14px",color:hideVal?"white":C.muted,fontSize:12,fontFamily:"inherit",fontWeight:"600",cursor:"pointer"}}>
-        {hideVal?"👁 Mostrar valores":"🙈 Ocultar valores"}
-      </button>
     </div>
 
     {/* Receita por Clínica por Especialidade */}
