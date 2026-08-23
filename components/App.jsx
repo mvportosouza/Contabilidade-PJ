@@ -724,6 +724,7 @@ export default function App() {
             month={month} year={year} MONTHS={MONTHS} C={C}
             fmtV={fmtV}
             setDrillModal={setDrillModal} fmtBRL={fmtMoney}
+            DAS={DAS} INSS={INSS} IRRF={IRRFef} CTB={CTB} PLef={PLef}
           />
         )}
       </div>
@@ -1429,7 +1430,7 @@ function LancTab({monthTxs,receitas,despesas,resultado,month,year,MONTHS,C,fmtBR
   </>);
 }
 
-function StatTab({monthTxs,receitas,despesas,month,year,MONTHS,C,fmtV,setDrillModal,fmtBRL,DAS,INSS,IRRF,CTB}){
+function StatTab({monthTxs,receitas,despesas,month,year,MONTHS,C,fmtV,setDrillModal,fmtBRL,DAS,INSS,IRRF,CTB,PLef}){
   const stats=getMonthlyStatistics(monthTxs);
   const recMes=stats.receitas;
   const ECOLS={"Endodontia":C.navyMid,"Ortodontia":C.gold,"Outros":C.muted};
@@ -1538,6 +1539,9 @@ function ReportButton({label="Gerar Relatório (PDF)", onGenerate}) {
     try {
       if (typeof onGenerate !== "function") throw new Error("Relatório indisponível.");
       const blob = await onGenerate();
+      if (!(blob instanceof Blob) || blob.type !== "application/pdf" || blob.size < 100) {
+        throw new Error("O relatório PDF não foi gerado corretamente.");
+      }
       await openPdfBlob(blob);
     } catch (err) {
       console.error(err);
