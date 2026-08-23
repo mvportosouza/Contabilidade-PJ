@@ -21,7 +21,7 @@ const LOGO = "/assets/logo-horizontal.jpeg";
 
 /* ─── Constants ─────────────────────────────────── */
 const MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
-const TIPOS_DESP = ["DAS","Pró-Labore","Distribuição de Lucros","INSS","Taxa","Imposto","Conta","Contabilidade","Escritório Virtual","Material","Outros"];
+const TIPOS_DESP = ["DAS","Pró-Labore","INSS","Taxa","Imposto","Conta","Contabilidade","Escritório Virtual","Material","Outros"];
 const TIPOS_REC  = ["Recebimento de Clientes","Estorno"];
 const ESPS       = ["Endodontia","Ortodontia"];
 const SAL_MIN    = SALARIO_MINIMO_2026;
@@ -203,6 +203,7 @@ export default function App() {
   const monthTxs = financeMonth.lancamentos;
   const receitas = financeMonth.receitas;
   const despesas = financeMonth.despesas;
+  const distribuicoes = financeMonth.distribuicoes || 0;
   const resultado = financeMonth.resultado;
 
   // Mapa efetivo do pró-labore: valores da contabilidade corrigem os meses
@@ -243,11 +244,9 @@ export default function App() {
 
   const totalObrig = DAS + INSS + CTB + IRRFef;
 
-  // Saldo de caixa acumulado até o período selecionado.
-  // Somente movimentações efetivamente lançadas alteram o caixa.
-  // DAS/INSS/IRRF/contabilidade calculados acima são obrigações/provisões;
-  // quando forem pagos, o pagamento deve ser lançado como despesa.
-  const saldo = calculateAccumulatedCash(txs, year, month, 0);
+  // Saldo atual é estritamente do mês selecionado, sem carregar o mês anterior.
+  // Distribuição de lucros não é despesa e, portanto, não reduz este resultado.
+  const saldo = receitas - despesas;
 
   const allYears = [...new Set([
     year,
@@ -312,9 +311,9 @@ export default function App() {
     if(formTipo==="receita"&&!form.nome){notify("Informe o nome da clínica.","err");return;}
     if(formTipo==="despesa"&&!form.categoria){notify("Selecione o tipo de despesa.","err");return;}
     const valor=parseBRL(form.valor); if(valor<=0){notify("Valor inválido.","err");return;}
-    const normalizedData = normalizeDateOnly(form.data); if(!normalizedData){notify("Data inválida.","err");return;} const tx={id:editId||cryptoId(),tipo:formTipo,valor,data:normalizedData,nome:form.nome||form.categoria,cnpj:form.cnpj,telefone:form.telefone,cep:form.cep,endereco:form.endereco,email:form.email,especialidade:form.especialidade,dente:form.dente,categoria:form.categoria,descricao:form.descricao,notaGerada:form.notaGerada,numeroNota:form.notaGerada?form.numeroNota:"",dataEmissao:form.notaGerada?(normalizeDateOnly(form.dataEmissao)||""):"",taxaISS:form.notaGerada?form.taxaISS:"",informadoContab:form.notaGerada?form.informadoContab:false};
+    const normalizedData = normalizeDateOnly(form.data); if(!normalizedData){notify("Data inválida.","err");return;} const tx={id:editId||cryptoId(),tipo:formTipo,valor,data:normalizedData,nome:form.nome||form.categoria||(formTipo==="distribuicao"?"Distribuição de Lucros":""),cnpj:form.cnpj,telefone:form.telefone,cep:form.cep,endereco:form.endereco,email:form.email,especialidade:form.especialidade,dente:form.dente,categoria:form.categoria,descricao:form.descricao,notaGerada:form.notaGerada,numeroNota:form.notaGerada?form.numeroNota:"",dataEmissao:form.notaGerada?(normalizeDateOnly(form.dataEmissao)||""):"",taxaISS:form.notaGerada?form.taxaISS:"",informadoContab:form.notaGerada?form.informadoContab:false};
     await saveTxs(editId?txs.map(t=>t.id===editId?tx:t):[tx,...txs]);
-    if(form.saveAsFav){
+    if(form.saveAsFav && formTipo!=="distribuicao"){
       const key=formTipo==="receita"?form.nome:form.categoria;
       const fd={id:cryptoId(),tipo:formTipo,nome:key,cnpj:form.cnpj,telefone:form.telefone,cep:form.cep,endereco:form.endereco,email:form.email,especialidade:form.especialidade,categoria:form.categoria};
       const ex=favs.find(f=>f.tipo===formTipo&&f.nome===key);
@@ -607,14 +606,20 @@ export default function App() {
   const fmtV=fmtMoney;
   const openTaxation=()=>setShowTaxation(true);
   const goToTaxation=()=>{ setTab("dashboard"); setShowTaxation(true); };
-  const nav=[{id:"dashboard",label:"Início",icon:"◎"},{id:"lancamentos",label:"Lançamentos",icon:"≡"},{id:"estatistica",label:"Estatística",icon:"◑"},{id:"anual",label:"Anual",icon:"▦"},{id:"mais",label:"Mais",icon:"⋯",action:goToTaxation}];
+  const nav=[{id:"dashboard",label:"Início",icon:"◎"},{id:"lancamentos",label:"Lançamentos",icon:"≡"},{id:"estatistica",label:"Dados Mensais",icon:"◑"},{id:"anual",label:"Dados Anuais",icon:"▦"},{id:"mais",label:"Mais",icon:"⋯",action:goToTaxation}];
 
   /* ══ RENDER ══════════════════════════════════════════════ */
   return (
-    <div style={{fontFamily:"Georgia,serif",background:C.bg,minHeight:"100vh",maxWidth:430,margin:"0 auto",position:"relative"}}>
+    <div className="app-shell" style={{fontFamily:"Georgia,serif",background:C.bg,minHeight:"100vh",maxWidth:430,margin:"0 auto",position:"relative"}}>
+      <style>{`@media print {
+        body { background: #fff !important; }
+        .app-shell { max-width: none !important; box-shadow: none !important; }
+        .app-header, .app-bottom-nav, button[aria-label="Gerar Relatório (PDF)"] { display: none !important; }
+        .app-shell > div { position: static !important; }
+      }`}</style>
 
       {/* Header */}
-      <div style={{background:"linear-gradient(180deg,#0F1E35,#1A3055)",position:"sticky",top:0,zIndex:30,boxShadow:"0 2px 12px rgba(0,0,0,0.2)"}}>
+      <div className="app-header" style={{background:"linear-gradient(180deg,#0F1E35,#1A3055)",position:"sticky",top:0,zIndex:30,boxShadow:"0 2px 12px rgba(0,0,0,0.2)"}}>
         <div style={{height:2,background:"linear-gradient(90deg,transparent,#C8A96E,transparent)"}}/>
         <div style={{display:"flex",justifyContent:"center",padding:"14px 16px 10px"}}>
           <img src={LOGO} alt="Marcus Vinícius" style={{height:72,maxWidth:"85%",objectFit:"contain",filter:"drop-shadow(0 2px 8px rgba(0,0,0,0.4))"}}/>
@@ -643,6 +648,9 @@ export default function App() {
             saldo={saldo} month={month} year={year} MONTHS={MONTHS}
             totalObrig={totalObrig} C={C} fmtBRL={fmtMoney} openTaxation={openTaxation}
             setNotaModal={setNotaModal}
+            contasPagar={getPreviousMonthPayables({
+              txs, effectivePlMap, ctbMap, irrfMap, year, month, calcTributacao, calcIRRF
+            })}
           />
         )}
 
@@ -657,7 +665,7 @@ export default function App() {
 
         {/* ── ESTATÍSTICA ── */}
         {tab==="anual" && (
-          <AnualTab txs={txs} plMap={effectivePlMap} irrfMap={irrfMap} year={year} C={C} fmtBRL={fmtMoney} calcIRRF={calcIRRF}/>
+          <AnualTab txs={txs} plMap={effectivePlMap} irrfMap={irrfMap} year={year} C={C} fmtBRL={fmtMoney} calcIRRF={calcIRRF} calcTributacao={calcTributacao}/>
         )}
 
         {tab==="estatistica" && (
@@ -671,7 +679,7 @@ export default function App() {
       </div>
 
       {/* Bottom Nav */}
-      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:"rgba(248,245,241,0.97)",backdropFilter:"blur(14px)",borderTop:`1px solid ${C.border}`,display:"flex",paddingBottom:16,zIndex:40}}>
+      <div className="app-bottom-nav" style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:"rgba(248,245,241,0.97)",backdropFilter:"blur(14px)",borderTop:`1px solid ${C.border}`,display:"flex",paddingBottom:16,zIndex:40}}>
         {nav.map(n=>(
           <button key={n.id} onClick={()=>n.action?n.action():setTab(n.id)} style={{flex:1,background:"none",border:"none",padding:"12px 0 4px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
             <span style={{fontSize:20,color:tab===n.id?C.navyMid:"#AAA"}}>{n.icon}</span>
@@ -685,11 +693,11 @@ export default function App() {
         <Modal onClose={()=>setShowForm(false)}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
             <div style={{display:"flex",alignItems:"center",gap:10}}>
-              <Pill color={formTipo==="receita"?C.navyMid:C.red} bg={formTipo==="receita"?C.navyLight:C.redLight}>{formTipo==="receita"?"💰 Receita":"💸 Despesa"}</Pill>
+              <Pill color={formTipo==="receita"?C.navyMid:formTipo==="despesa"?C.red:C.gold} bg={formTipo==="receita"?C.navyLight:formTipo==="despesa"?C.redLight:"#F8F1E5"}>{formTipo==="receita"?"💰 Receita":formTipo==="despesa"?"💸 Despesa":"💰 Distribuição de Lucro"}</Pill>
               <span style={{fontSize:13,color:"#999"}}>{editId?"Editar":"Novo"}</span>
             </div>
             <div style={{display:"flex",gap:8}}>
-              {favsAtt.length>0 && <button onClick={()=>setShowFavPick(true)} style={{background:formTipo==="receita"?C.navyLight:C.redLight,border:"none",borderRadius:10,padding:"7px 12px",color:formTipo==="receita"?C.navyMid:C.red,fontSize:13,cursor:"pointer"}}>⭐ Favs</button>}
+              {formTipo!=="distribuicao" && favsAtt.length>0 && <button onClick={()=>setShowFavPick(true)} style={{background:formTipo==="receita"?C.navyLight:C.redLight,border:"none",borderRadius:10,padding:"7px 12px",color:formTipo==="receita"?C.navyMid:C.red,fontSize:13,cursor:"pointer"}}>⭐ Favs</button>}
               <CloseBtn onClick={()=>setShowForm(false)}/>
             </div>
           </div>
@@ -719,6 +727,10 @@ export default function App() {
             </Field>
             <Field label="Observação">
               <textarea value={form.descricao} onChange={e=>setForm(f=>({...f,descricao:e.target.value}))} rows={3} placeholder="Detalhes..." style={{...iSt,resize:"none",lineHeight:1.5}}/>
+            </Field>
+          </> : formTipo==="distribuicao" ? <>
+            <Field label="Descrição">
+              <input value={form.descricao} onChange={e=>setForm(f=>({...f,descricao:e.target.value}))} placeholder="Ex: Distribuição de lucros" style={iSt}/>
             </Field>
           </> : <>
             <Field label="Tipo de Despesa *">
@@ -774,8 +786,8 @@ export default function App() {
             <ChkBox checked={form.saveAsFav} onChange={v=>setForm(f=>({...f,saveAsFav:v}))}/>
             <span style={{fontSize:13,color:"#666"}}>Salvar nos favoritos</span>
           </label>
-          <button onClick={handleSubmit} style={{width:"100%",background:formTipo==="receita"?`linear-gradient(135deg,${C.navy},${C.navyMid})`:"linear-gradient(135deg,#962d22,#C0392B)",color:"white",border:"none",borderRadius:16,padding:"16px",fontSize:16,fontFamily:"inherit",cursor:"pointer",fontWeight:"600"}}>
-            {editId?"Salvar Alterações":formTipo==="receita"?"Registrar Receita":"Registrar Despesa"}
+          <button onClick={handleSubmit} style={{width:"100%",background:formTipo==="receita"?`linear-gradient(135deg,${C.navy},${C.navyMid})`:formTipo==="despesa"?"linear-gradient(135deg,#962d22,#C0392B)":`linear-gradient(135deg,${C.gold},#B89454)`,color:"white",border:"none",borderRadius:16,padding:"16px",fontSize:16,fontFamily:"inherit",cursor:"pointer",fontWeight:"600"}}>
+            {editId?"Salvar Alterações":formTipo==="receita"?"Registrar Receita":formTipo==="despesa"?"Registrar Despesa":"Registrar Distribuição de Lucro"}
           </button>
         </Modal>
       )}
@@ -858,7 +870,7 @@ export default function App() {
           {drillModal.items.map(tx=>{
             const d=new Date(tx.data+"T12:00:00"); const isR=tx.tipo==="receita";
             return (
-              <div key={tx.id} style={{background:"white",borderRadius:14,padding:"13px 15px",marginBottom:10,boxShadow:"0 1px 8px rgba(0,0,0,0.05)",borderLeft:`3px solid ${isR?C.navyMid:C.red}`}}>
+              <div key={tx.id} style={{background:"white",borderRadius:14,padding:"13px 15px",marginBottom:10,boxShadow:"0 1px 8px rgba(0,0,0,0.05)",borderLeft:`3px solid ${txColor}`}}>
                 <div style={{display:"flex",justifyContent:"space-between"}}>
                   <div>
                     <p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>{tx.nome||"—"}</p>
@@ -1119,8 +1131,62 @@ export default function App() {
   );
 }
 
+
+/* ─── Contas a Pagar ─────────────────────────────── */
+function getPreviousMonthPayables({txs, effectivePlMap, ctbMap, irrfMap, year, month, calcTributacao, calcIRRF}) {
+  const previous = new Date(Number(year), Number(month) - 1, 1);
+  const py = previous.getFullYear();
+  const pm = previous.getMonth();
+  const key = `${py}-${String(pm + 1).padStart(2, "0")}`;
+  const revenue = (Array.isArray(txs) ? txs : [])
+    .filter(t => t?.tipo === "receita" && t?.data)
+    .filter(t => {
+      const d = new Date(`${String(t.data).slice(0,10)}T12:00:00`);
+      return !Number.isNaN(d.getTime()) && d.getFullYear() === py && d.getMonth() === pm;
+    })
+    .reduce((s,t) => s + Math.max(0, Number(t.valor) || 0), 0);
+
+  const taxation = typeof calcTributacao === "function"
+    ? calcTributacao(txs, effectivePlMap || {}, py, pm, revenue)
+    : { das: 0 };
+
+  const pl = Math.max(0, Number(effectivePlMap?.[key]) || 0);
+  const inss = pl * 0.11;
+  const irrf = Object.prototype.hasOwnProperty.call(irrfMap || {}, key)
+    ? Math.max(0, Number(irrfMap[key]) || 0)
+    : (typeof calcIRRF === "function" ? Math.max(0, Number(calcIRRF(pl, {inss}).valor)) : 0);
+  const ctb = Math.max(0, Number(ctbMap?.[key]) || 0);
+
+  const due = (day, label, amount) => {
+    const d = new Date(Number(year), Number(month), day);
+    const today = new Date();
+    const selectedIsCurrentMonth = today.getFullYear() === Number(year) && today.getMonth() === Number(month);
+    let timing = `Vencimento dia ${day}`;
+    if (selectedIsCurrentMonth) {
+      const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const diff = Math.round((d - todayStart) / 86400000);
+      if (diff === 0) timing = "Vence hoje";
+      else if (diff > 0) timing = `Vence em ${diff} dia${diff === 1 ? "" : "s"}`;
+      else timing = `Vencido há ${Math.abs(diff)} dia${Math.abs(diff) === 1 ? "" : "s"}`;
+    }
+    return { label, amount: Math.max(0, Number(amount) || 0), dueDate: d, timing };
+  };
+
+  const items = [
+    due(20, "DAS", taxation?.das || 0),
+    due(20, "DARF (INSS + IRRF)", inss + irrf),
+    due(15, "Contabilidade", ctb),
+  ];
+
+  return {
+    competenceLabel: `${MONTHS[pm]} ${py}`,
+    items,
+    total: items.reduce((s, item) => s + item.amount, 0),
+  };
+}
+
 /* ─── Tab Components ─────────────────────────────── */
-function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,MONTHS,totalObrig,C,fmtBRL,setNotaModal,openTaxation}){
+function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,MONTHS,totalObrig,C,fmtBRL,setNotaModal,openTaxation,contasPagar}){
   return(<>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
       <Card><SmLabel>Receita</SmLabel><BigVal color={C.navyMid}>{fmtBRL(receitas)}</BigVal></Card>
@@ -1130,8 +1196,8 @@ function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,MONTHS,t
     <Card style={{marginBottom:12}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
         <div>
-          <SmLabel>Saldo Acumulado</SmLabel>
-          <p style={{margin:"2px 0 0",fontSize:11,color:"#BBB"}}>Resultado acumulado dos lançamentos até {MONTHS[month]} {year}</p>
+          <SmLabel>Saldo Atual</SmLabel>
+          <p style={{margin:"2px 0 0",fontSize:11,color:"#BBB"}}>Receita - Contas a Pagar · {MONTHS[month]} {year}</p>
         </div>
         <div style={{textAlign:"right"}}>
           <p style={{margin:0,fontSize:26,fontWeight:"bold",color:saldo>=0?C.navyMid:C.red,letterSpacing:-1}}>{fmtBRL(saldo)}</p>
@@ -1159,10 +1225,10 @@ function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,MONTHS,t
       const nfBtns=[
         {key:"emitEnviadas",  label:"Emitidas Enviadas",  count:emitEnv.length,  color:"#27AE60",  bg:"#EAFAF1", border:"#A9DFBF"},
         {key:"emitPendentes", label:"Emitidas Pendentes", count:emitPend.length, color:C.navyMid,  bg:C.navyLight,border:"#B8DEC0"},
-        {key:"pendentes",     label:"À Emitir",            count:naoEmit.length,  color:"#E67E22",  bg:"#FFF8F0", border:"#F0C89A"},
+        {key:"pendentes",     label:"À Emitir",            count:naoEmit.length,  color:"#E67E22", bg:"#FFF8F0", border:"#F0C89A"},
       ];
       return(
-        <Card>
+        <Card style={{marginBottom:12}}>
           <SmLabel style={{marginBottom:14}}>Notas Fiscais — {MONTHS[month]}</SmLabel>
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
             {nfBtns.map(btn=>(
@@ -1179,15 +1245,39 @@ function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,MONTHS,t
         </Card>
       );
     })()}
+    <Card style={{marginBottom:12}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,marginBottom:12}}>
+        <div>
+          <SmLabel>Contas a Pagar</SmLabel>
+          <p style={{margin:"4px 0 0",fontSize:11,color:"#BBB"}}>Tributos e obrigações de {contasPagar?.competenceLabel || "mês anterior"}</p>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <p style={{margin:0,fontSize:18,fontWeight:"bold",color:C.navyMid}}>{fmtBRL(contasPagar?.total || 0)}</p>
+          <p style={{margin:"2px 0 0",fontSize:9,color:C.muted}}>Total</p>
+        </div>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {(contasPagar?.items || []).map(item=>(
+          <div key={item.label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#FAFAF8",border:`1px solid ${C.border}`,borderRadius:12,padding:"11px 13px"}}>
+            <div style={{minWidth:0}}>
+              <p style={{margin:0,fontSize:13,fontWeight:"700",color:C.text}}>{item.label}</p>
+              <p style={{margin:"3px 0 0",fontSize:10,color:C.muted}}>{item.timing}</p>
+            </div>
+            <p style={{margin:0,fontSize:13,fontWeight:"bold",color:item.amount>0?C.navyMid:"#BBB"}}>{fmtBRL(item.amount)}</p>
+          </div>
+        ))}
+      </div>
+    </Card>
   </>);
 }
 
 function LancTab({monthTxs,receitas,despesas,resultado,month,year,MONTHS,C,fmtBRL,openNew,openEdit,delTx}){
   return(<>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
       <button onClick={()=>openNew("receita")} style={{background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,border:"none",borderRadius:16,padding:"16px",color:"white",fontSize:15,fontFamily:"inherit",fontWeight:"700",cursor:"pointer",boxShadow:"0 4px 18px rgba(15,30,53,0.3)"}}>💰 + Receita</button>
       <button onClick={()=>openNew("despesa")} style={{background:"linear-gradient(135deg,#962d22,#C0392B)",border:"none",borderRadius:16,padding:"16px",color:"white",fontSize:15,fontFamily:"inherit",fontWeight:"700",cursor:"pointer",boxShadow:"0 4px 18px rgba(192,57,43,0.3)"}}>💸 + Despesa</button>
     </div>
+    <button onClick={()=>openNew("distribuicao")} style={{width:"100%",background:`linear-gradient(135deg,${C.gold},#B89454)`,border:"none",borderRadius:16,padding:"14px 16px",marginBottom:14,color:"white",fontSize:14,fontFamily:"inherit",fontWeight:"700",cursor:"pointer",boxShadow:"0 4px 18px rgba(200,169,110,0.25)"}}>💰 + Distribuição de Lucro</button>
     <div style={{background:"white",borderRadius:14,padding:"12px 16px",marginBottom:14,display:"flex",gap:12,boxShadow:"0 1px 8px rgba(0,0,0,0.05)"}}>
       <MS label="Receitas" value={receitas} color={C.navyMid} f={fmtBRL}/>
       <div style={{width:1,background:C.border}}/>
@@ -1200,9 +1290,10 @@ function LancTab({monthTxs,receitas,despesas,resultado,month,year,MONTHS,C,fmtBR
       ?<div style={{background:"white",borderRadius:18,padding:"36px 20px",textAlign:"center",border:"1px dashed #E0D8CE"}}>
         <p style={{fontSize:36,margin:0}}>📋</p>
         <p style={{margin:"8px 0 16px",fontSize:14,color:"#CCC"}}>Nenhum lançamento neste mês</p>
-        <div style={{display:"flex",gap:8,justifyContent:"center"}}>
+        <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
           <button onClick={()=>openNew("receita")} style={{background:C.navyLight,border:"none",borderRadius:12,padding:"10px 18px",color:C.navyMid,fontSize:13,fontFamily:"inherit",cursor:"pointer",fontWeight:"600"}}>+ Receita</button>
           <button onClick={()=>openNew("despesa")} style={{background:C.redLight,border:"none",borderRadius:12,padding:"10px 18px",color:C.red,fontSize:13,fontFamily:"inherit",cursor:"pointer",fontWeight:"600"}}>+ Despesa</button>
+          <button onClick={()=>openNew("distribuicao")} style={{background:"#F8F1E5",border:"none",borderRadius:12,padding:"10px 18px",color:C.gold,fontSize:13,fontFamily:"inherit",cursor:"pointer",fontWeight:"600"}}>+ Distribuição de Lucro</button>
         </div>
       </div>
       :monthTxs.map(tx=><TxCard key={tx.id} tx={tx} onEdit={openEdit} onDelete={delTx} C={C} fmtBRL={fmtBRL} MONTHS={MONTHS}/>)
@@ -1215,6 +1306,7 @@ function StatTab({monthTxs,receitas,despesas,month,year,MONTHS,C,fmtV,setDrillMo
   const recMes=stats.receitas;
   const ECOLS={"Endodontia":C.navyMid,"Ortodontia":C.gold,"Outros":C.muted};
   return(<>
+    <ReportButton />
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
       <p style={{margin:0,fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase"}}>{MONTHS[month]} {year}</p>
     </div>
@@ -1303,73 +1395,208 @@ function StatTab({monthTxs,receitas,despesas,month,year,MONTHS,C,fmtV,setDrillMo
   </>);
 }
 
-function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF}){
-  const MS=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
-  const data=getAnnualStatistics(txs,plMap,irrfMap,year,calcIRRF).map((row,i)=>({...row,mes:MS[i]})).filter(d=>d.receita>0||d.pl>0);
-
-  if(data.length===0) return(
-    <div style={{background:"white",borderRadius:18,padding:"40px 20px",textAlign:"center",border:"1px dashed #E0D8CE"}}>
-      <p style={{fontSize:36,margin:0}}>📊</p>
-      <p style={{margin:"8px 0 0",fontSize:14,color:"#CCC"}}>Nenhum dado em {year}</p>
-    </div>
+function ReportButton({label="Gerar Relatório (PDF)"}) {
+  const handlePrint = () => {
+    if (typeof window === "undefined") return;
+    const previousTitle = document.title;
+    document.title = "Contabilidade-PJ — Relatório";
+    window.print();
+    window.setTimeout(() => { document.title = previousTitle; }, 1000);
+  };
+  return (
+    <button
+      onClick={handlePrint}
+      aria-label={label}
+      style={{
+        width:"100%",
+        background:"white",
+        border:"1px solid #E0D8CE",
+        borderRadius:14,
+        padding:"12px 14px",
+        marginBottom:12,
+        color:"#1A3055",
+        fontFamily:"inherit",
+        fontSize:13,
+        fontWeight:"700",
+        cursor:"pointer",
+        boxShadow:"0 1px 8px rgba(0,0,0,0.04)"
+      }}
+    >
+      📄 {label}
+    </button>
   );
+}
+
+function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributacao}){
+  const MS=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+  const [taxDetail,setTaxDetail]=useState(null);
+  const data=getAnnualStatistics(txs,plMap,irrfMap,year,calcIRRF,calcTributacao)
+    .map((row,i)=>({...row,mes:MS[i]}));
+
+  const fmtK=v=>v>=1000?`R$${(v/1000).toFixed(1)}k`:`R$${v.toFixed(0)}`;
+  const pct=v=>`${Number(v||0).toFixed(1)}%`;
+  const tooltipStyle={borderRadius:10,border:"none",boxShadow:"0 4px 12px rgba(0,0,0,0.12)",fontSize:12};
+  const active=data.filter(d=>d.receita>0||d.despesa>0||d.pl>0||d.distribuicao>0);
+  const best=active.length?active.reduce((a,b)=>b.lucro>a.lucro?b:a):null;
+  const worst=active.length?active.reduce((a,b)=>b.lucro<a.lucro?b:a):null;
 
   const charts=[
-    {label:"Receita Mensal",    key:"receita", color:"#1A3055"},
-    {label:"Pró-labore Mensal", key:"pl",      color:"#C8A96E"},
-    {label:"INSS Mensal",       key:"inss",    color:"#8E44AD"},
-    {label:"IRRF Mensal",       key:"irrf",    color:"#C0392B"},
+    {label:"Receita total",key:"receita",color:C.navyMid,format:"money"},
+    {label:"Despesas totais",key:"despesa",color:C.red,format:"money"},
+    {label:"Lucro líquido",key:"lucro",color:"#2E7D32",format:"money"},
+    {label:"Impostos pagos",key:"impostos",color:"#C0392B",format:"money",clickTax:true},
+    {label:"Pró-labore",key:"pl",color:C.gold,format:"money"},
+    {label:"INSS",key:"inss",color:"#8E44AD",format:"money"},
+    {label:"IRRF",key:"irrf",color:"#C0392B",format:"money"},
+    {label:"Distribuição de lucros",key:"distribuicao",color:"#B8860B",format:"money"},
+    {label:"Margem líquida",key:"margem",color:C.navyMid,format:"percent"},
+    {label:"Receita média mensal",key:"mediaReceitaAcumulada",color:"#5D6D7E",format:"money"},
+    {label:"Melhor mês",key:"melhorMes",color:"#2E7D32",format:"money",highlight:"best"},
+    {label:"Pior mês",key:"piorMes",color:C.red,format:"money",highlight:"worst"},
+    {label:"Evolução mês a mês",key:"evolucao",color:"#6C7A89",format:"money",evolution:true},
   ];
-  const fmtK=v=>v>=1000?`R$${(v/1000).toFixed(1)}k`:`R$${v.toFixed(0)}`;
+
+  const renderChart=(ch)=>{
+    let chartData=data;
+    if(ch.key==="melhorMes") chartData=data.map(d=>({...d,melhorMes:d.isMelhor?d.lucro:0}));
+    else if(ch.key==="piorMes") chartData=data.map(d=>({...d,piorMes:d.isPior?d.lucro:0}));
+    else if(ch.key==="evolucao") chartData=data.map((d,i)=>({...d,evolucao:i===0?0:d.receita-data[i-1].receita}));
+
+    const total=ch.key==="evolucao"
+      ? chartData.reduce((s,d)=>s+d.evolucao,0)
+      : chartData.reduce((s,d)=>s+Number(d[ch.key]||0),0);
+    const avg=ch.format==="percent"
+      ? data.length?data.reduce((s,d)=>s+Number(d[ch.key]||0),0)/data.length:0
+      : ch.key==="mediaReceitaAcumulada"
+        ? (data[data.length-1]?.mediaReceitaAcumulada || 0)
+        : total/12;
+    const headlineValue=ch.key==="mediaReceitaAcumulada"
+      ? fmtBRL(avg)
+      : ch.format==="percent"
+        ? pct(avg)
+        : fmtBRL(total);
+
+    return (
+      <div key={ch.key} style={{background:"white",borderRadius:18,padding:"18px",marginBottom:12,boxShadow:"0 2px 16px rgba(0,0,0,0.06)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+          <p style={{margin:0,fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase"}}>{ch.label}</p>
+          <div style={{textAlign:"right"}}>
+            <p style={{margin:0,fontSize:14,fontWeight:"bold",color:ch.color}}>
+              {headlineValue}
+            </p>
+            {ch.format!=="percent" && ch.key!=="evolucao" && ch.key!=="mediaReceitaAcumulada" && <p style={{margin:"2px 0 0",fontSize:10,color:C.muted}}>Média: {fmtBRL(avg)}/mês</p>}
+            {ch.key==="mediaReceitaAcumulada" && <p style={{margin:"2px 0 0",fontSize:10,color:C.muted}}>Média acumulada até o mês</p>}
+            {ch.key==="evolucao" && <p style={{margin:"2px 0 0",fontSize:10,color:C.muted}}>Variação acumulada</p>}
+          </div>
+        </div>
+        <ResponsiveContainer width="100%" height={180}>
+          <BarChart data={chartData} margin={{top:8,right:8,left:-8,bottom:0}}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE3" vertical={false}/>
+            <XAxis dataKey="mes" tick={{fontSize:10,fill:C.muted}} axisLine={false} tickLine={false}/>
+            <YAxis
+              tick={{fontSize:9,fill:C.muted}}
+              tickFormatter={ch.format==="percent" ? pct : fmtK}
+              axisLine={false}
+              tickLine={false}
+              width={48}
+            />
+            <Tooltip
+              formatter={(v)=>[ch.format==="percent"?pct(v):fmtBRL(v)]}
+              contentStyle={tooltipStyle}
+              labelStyle={{color:C.text,fontWeight:"600"}}
+            />
+            {ch.key==="mediaReceitaAcumulada" && (
+              <ReferenceLine y={data.length?data[data.length-1].mediaReceitaAcumulada:0} stroke={ch.color} strokeDasharray="5 4" strokeWidth={1.5}/>
+            )}
+            {ch.format==="percent" && <ReferenceLine y={0} stroke="#AAA"/>}
+            <Bar
+              dataKey={ch.key}
+              fill={ch.color}
+              radius={[4,4,0,0]}
+              maxBarSize={30}
+              onClick={(entry)=>{
+                const row = entry?.payload || entry;
+                if(ch.clickTax && row?.mes) setTaxDetail(row);
+              }}
+              style={{cursor:ch.clickTax?"pointer":"default"}}
+            >
+              {(ch.highlight==="best" ? chartData : ch.highlight==="worst" ? chartData : []).map((d,i)=>(
+                <Cell key={i} fill={d.isMelhor&&ch.highlight==="best" ? "#2E7D32" : d.isPior&&ch.highlight==="worst" ? C.red : ch.color}/>
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+        {ch.key==="melhorMes" && <p style={{margin:"8px 0 0",fontSize:11,color:C.muted}}>Melhor mês: <strong>{best?.mes || "—"}</strong>{best ? ` · ${fmtBRL(best.lucro)}` : ""}</p>}
+        {ch.key==="piorMes" && <p style={{margin:"8px 0 0",fontSize:11,color:C.muted}}>Pior mês: <strong>{worst?.mes || "—"}</strong>{worst ? ` · ${fmtBRL(worst.lucro)}` : ""}</p>}
+        {ch.clickTax && <p style={{margin:"8px 0 0",fontSize:10,color:"#AAA"}}>Toque em uma barra para ver DAS + INSS + IRRF.</p>}
+      </div>
+    );
+  };
+
+  const groupedData=data.map(d=>({...d,receita:d.receita,despesa:d.despesa,lucro:d.lucro}));
 
   return(<>
-    <p style={{margin:"0 0 14px",fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase"}}>Visão Anual · {year}</p>
-    {charts.map(ch=>{
-      const total=data.reduce((s,d)=>s+d[ch.key],0);
-      const media=data.length>0?total/data.length:0;
-      return(
-        <div key={ch.key} style={{background:"white",borderRadius:18,padding:"18px",marginBottom:12,boxShadow:"0 2px 16px rgba(0,0,0,0.06)"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
-            <p style={{margin:0,fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase"}}>{ch.label}</p>
-            <div style={{textAlign:"right"}}>
-              <p style={{margin:0,fontSize:14,fontWeight:"bold",color:ch.color}}>{fmtBRL(total)}</p>
-              <p style={{margin:"2px 0 0",fontSize:10,color:C.muted}}>Média: {fmtBRL(media)}/mês</p>
-            </div>
+    <ReportButton />
+    <p style={{margin:"0 0 14px",fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase"}}>Dados Anuais · {year}</p>
+    {charts.map(renderChart)}
+    <div style={{background:"white",borderRadius:18,padding:"18px",marginBottom:12,boxShadow:"0 2px 16px rgba(0,0,0,0.06)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+        <p style={{margin:0,fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase"}}>Receita × Despesa × Lucro</p>
+        <p style={{margin:0,fontSize:14,fontWeight:"bold",color:C.navyMid}}>{fmtBRL(data.reduce((s,d)=>s+d.lucro,0))}</p>
+      </div>
+      <ResponsiveContainer width="100%" height={200}>
+        <BarChart data={groupedData} margin={{top:8,right:8,left:-8,bottom:0}}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE3" vertical={false}/>
+          <XAxis dataKey="mes" tick={{fontSize:10,fill:C.muted}} axisLine={false} tickLine={false}/>
+          <YAxis tick={{fontSize:9,fill:C.muted}} tickFormatter={fmtK} axisLine={false} tickLine={false} width={48}/>
+          <Tooltip
+            formatter={(v,n)=>[fmtBRL(v),n==="receita"?"Receita":n==="despesa"?"Despesa":"Lucro"]}
+            contentStyle={tooltipStyle}
+            labelStyle={{color:C.text,fontWeight:"600"}}
+          />
+          <Bar dataKey="receita" fill={C.navyMid} radius={[4,4,0,0]} maxBarSize={18}/>
+          <Bar dataKey="despesa" fill={C.red} radius={[4,4,0,0]} maxBarSize={18}/>
+          <Bar dataKey="lucro" fill="#2E7D32" radius={[4,4,0,0]} maxBarSize={18}/>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+
+    {taxDetail && (
+      <Modal onClose={()=>setTaxDetail(null)}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div>
+            <SmLabel>Impostos · {taxDetail.mes}</SmLabel>
+            <p style={{margin:"4px 0 0",fontSize:20,fontWeight:"bold",color:C.navyMid}}>{fmtBRL(taxDetail.impostos)}</p>
           </div>
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={data} margin={{top:8,right:8,left:-8,bottom:0}}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE3" vertical={false}/>
-              <XAxis dataKey="mes" tick={{fontSize:10,fill:C.muted}} axisLine={false} tickLine={false}/>
-              <YAxis tick={{fontSize:9,fill:C.muted}} tickFormatter={fmtK} axisLine={false} tickLine={false} width={48}/>
-              <Tooltip
-                formatter={v=>[fmtBRL(v)]}
-                contentStyle={{borderRadius:10,border:"none",boxShadow:"0 4px 12px rgba(0,0,0,0.12)",fontSize:12}}
-                labelStyle={{color:C.text,fontWeight:"600"}}
-              />
-              <ReferenceLine
-                y={media}
-                stroke={ch.color}
-                strokeDasharray="5 4"
-                strokeWidth={1.5}
-                label={{value:`Média`,position:"insideTopRight",fontSize:9,fill:ch.color,fontWeight:"600"}}
-              />
-              <Bar dataKey={ch.key} fill={ch.color} radius={[4,4,0,0]} maxBarSize={36}/>
-            </BarChart>
-          </ResponsiveContainer>
+          <CloseBtn onClick={()=>setTaxDetail(null)}/>
         </div>
-      );
-    })}
+        {[
+          ["DAS",taxDetail.das],
+          ["INSS",taxDetail.inss],
+          ["IRRF",taxDetail.irrf],
+        ].map(([label,value])=>(
+          <div key={label} style={{display:"flex",justifyContent:"space-between",padding:"12px 0",borderBottom:`1px solid ${C.border}`}}>
+            <span style={{fontSize:14,color:C.text,fontWeight:"600"}}>{label}</span>
+            <span style={{fontSize:14,color:C.navyMid,fontWeight:"bold"}}>{fmtBRL(value)}</span>
+          </div>
+        ))}
+      </Modal>
+    )}
   </>);
 }
 
 function TxCard({tx,onEdit,onDelete,C,fmtBRL,MONTHS}){
   const [open,setOpen]=useState(false);
-  const d=new Date(tx.data+"T12:00:00"); const isR=tx.tipo==="receita";
+  const d=new Date(tx.data+"T12:00:00");
+  const isR=tx.tipo==="receita";
+  const isD=tx.tipo==="distribuicao";
+  const txColor=isR?C.navyMid:isD?C.gold:C.red;
+  const txBg=isR?C.navyLight:isD?"#F8F1E5":C.redLight;
   return(
-    <div style={{background:"white",borderRadius:16,padding:"13px 15px",marginBottom:10,boxShadow:"0 1px 8px rgba(0,0,0,0.05)",borderLeft:`3px solid ${isR?C.navyMid:C.red}`}}>
+    <div style={{background:"white",borderRadius:16,padding:"13px 15px",marginBottom:10,boxShadow:"0 1px 8px rgba(0,0,0,0.05)",borderLeft:`3px solid ${txColor}`}}>
       <div style={{display:"flex",alignItems:"center",gap:11}}>
-        <div style={{background:isR?C.navyLight:C.redLight,borderRadius:11,padding:"7px 9px",textAlign:"center",minWidth:44}}>
-          <p style={{margin:0,fontSize:15,fontWeight:"bold",color:isR?C.navyMid:C.red,lineHeight:1}}>{d.getDate().toString().padStart(2,"0")}</p>
+        <div style={{background:txBg,borderRadius:11,padding:"7px 9px",textAlign:"center",minWidth:44}}>
+          <p style={{margin:0,fontSize:15,fontWeight:"bold",color:txColor,lineHeight:1}}>{d.getDate().toString().padStart(2,"0")}</p>
           <p style={{margin:0,fontSize:9,color:"#8B7F72",letterSpacing:1}}>{MONTHS[d.getMonth()].slice(0,3).toUpperCase()}</p>
         </div>
         <div style={{flex:1,minWidth:0}}>
@@ -1379,7 +1606,7 @@ function TxCard({tx,onEdit,onDelete,C,fmtBRL,MONTHS}){
           {isR&&<span style={{display:"inline-block",marginTop:3,fontSize:10,background:tx.notaGerada?"#EBF5EE":C.redLight,color:tx.notaGerada?C.navyMid:C.red,borderRadius:5,padding:"2px 7px",fontWeight:"600"}}>{tx.notaGerada?`✅ NF${tx.numeroNota?" #"+tx.numeroNota:""}`:   "⏳ NF Pendente"}</span>}
         </div>
         <div style={{textAlign:"right",flexShrink:0}}>
-          <p style={{margin:0,fontSize:15,fontWeight:"bold",color:isR?C.navyMid:C.red}}>{isR?"+":"-"}{fmtBRL(tx.valor)}</p>
+          <p style={{margin:0,fontSize:15,fontWeight:"bold",color:txColor}}>{isR?"+":isD?"":"-"}{fmtBRL(tx.valor)}</p>
           <button onClick={()=>setOpen(!open)} style={{background:"none",border:"none",color:"#CCC",fontSize:13,cursor:"pointer",padding:0}}>{open?"▲":"▾"}</button>
         </div>
       </div>
