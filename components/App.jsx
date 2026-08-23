@@ -6,6 +6,7 @@ import { ACCOUNTING_PL_BY_MONTH } from "../lib/accounting";
 import { supabase } from "../lib/supabaseClient";
 import { BACKUP_VERSION, cryptoId, normalizeBackup, normalizeDateOnly } from "../lib/validators";
 import { calculateMonthlyFinance, calculateAccumulatedCash } from "../lib/finance";
+import { generateMonthlyReportPdf, generateAnnualReportPdf, openPdfBlob } from "../lib/pdf";
 import { getMonthlyStatistics, getAnnualStatistics } from "../lib/statistics";
 import {
   calcINSS,
@@ -14,7 +15,7 @@ import {
   calcTributacao,
   SALARIO_MINIMO_2026,
 } from "../lib/taxes";
-import { PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine } from "recharts";
+import { PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine, ComposedChart, Line } from "recharts";
 
 /* ─── Logo ─────────────────────────────────────── */
 const LOGO = "/assets/logo-horizontal.jpeg";
@@ -868,7 +869,7 @@ export default function App() {
             <CloseBtn onClick={()=>setDrillModal(null)}/>
           </div>
           {drillModal.items.map(tx=>{
-            const d=new Date(tx.data+"T12:00:00"); const isR=tx.tipo==="receita";
+            const d=new Date(tx.data+"T12:00:00"); const isR=tx.tipo==="receita"; const txColor=isR?C.navyMid:tx.tipo==="distribuicao"?C.gold:C.red;
             return (
               <div key={tx.id} style={{background:"white",borderRadius:14,padding:"13px 15px",marginBottom:10,boxShadow:"0 1px 8px rgba(0,0,0,0.05)",borderLeft:`3px solid ${txColor}`}}>
                 <div style={{display:"flex",justifyContent:"space-between"}}>
@@ -1301,12 +1302,19 @@ function LancTab({monthTxs,receitas,despesas,resultado,month,year,MONTHS,C,fmtBR
   </>);
 }
 
-function StatTab({monthTxs,receitas,despesas,month,year,MONTHS,C,fmtV,setDrillModal,fmtBRL}){
+function StatTab({monthTxs,receitas,despesas,month,year,MONTHS,C,fmtV,setDrillModal,fmtBRL,DAS,INSS,IRRF,CTB}){
   const stats=getMonthlyStatistics(monthTxs);
   const recMes=stats.receitas;
   const ECOLS={"Endodontia":C.navyMid,"Ortodontia":C.gold,"Outros":C.muted};
   return(<>
-    <ReportButton />
+    <ReportButton onGenerate={() => generateMonthlyReportPdf({
+      year,
+      month,
+      monthLabel: MONTHS[month],
+      stats,
+      taxes: { das: DAS, inss: INSS, irrf: IRRF, contabilidade: CTB },
+      transactions: monthTxs,
+    })} />
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
       <p style={{margin:0,fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase"}}>{MONTHS[month]} {year}</p>
     </div>
@@ -1395,18 +1403,29 @@ function StatTab({monthTxs,receitas,despesas,month,year,MONTHS,C,fmtV,setDrillMo
   </>);
 }
 
-function ReportButton({label="Gerar Relatório (PDF)"}) {
-  const handlePrint = () => {
-    if (typeof window === "undefined") return;
-    const previousTitle = document.title;
-    document.title = "Contabilidade-PJ — Relatório";
-    window.print();
-    window.setTimeout(() => { document.title = previousTitle; }, 1000);
+function ReportButton({label="Gerar Relatório (PDF)", onGenerate}) {
+  const [busy,setBusy]=useState(false);
+  const handleGenerate = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      if (typeof onGenerate !== "function") throw new Error("Relatório indisponível.");
+      const blob = await onGenerate();
+      await openPdfBlob(blob);
+    } catch (err) {
+      console.error(err);
+      if (typeof window !== "undefined") {
+        window.alert("Não foi possível gerar o PDF. Tente novamente.");
+      }
+    } finally {
+      setBusy(false);
+    }
   };
   return (
     <button
-      onClick={handlePrint}
+      onClick={handleGenerate}
       aria-label={label}
+      disabled={busy}
       style={{
         width:"100%",
         background:"white",
@@ -1418,11 +1437,12 @@ function ReportButton({label="Gerar Relatório (PDF)"}) {
         fontFamily:"inherit",
         fontSize:13,
         fontWeight:"700",
-        cursor:"pointer",
+        cursor:busy?"wait":"pointer",
+        opacity:busy?0.7:1,
         boxShadow:"0 1px 8px rgba(0,0,0,0.04)"
       }}
     >
-      📄 {label}
+      {busy ? "⏳ Gerando PDF..." : `📄 ${label}`}
     </button>
   );
 }
@@ -1436,9 +1456,17 @@ function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributacao}){
   const fmtK=v=>v>=1000?`R$${(v/1000).toFixed(1)}k`:`R$${v.toFixed(0)}`;
   const pct=v=>`${Number(v||0).toFixed(1)}%`;
   const tooltipStyle={borderRadius:10,border:"none",boxShadow:"0 4px 12px rgba(0,0,0,0.12)",fontSize:12};
-  const active=data.filter(d=>d.receita>0||d.despesa>0||d.pl>0||d.distribuicao>0);
+  const active=data.filter(d=>d.ativo);
   const best=active.length?active.reduce((a,b)=>b.lucro>a.lucro?b:a):null;
   const worst=active.length?active.reduce((a,b)=>b.lucro<a.lucro?b:a):null;
+
+  const withMovingAverage=(rows,key)=>{
+    let values=[];
+    return rows.map((row)=>{
+      values=[...values,Number(row[key]||0)].slice(-3);
+      return {...row,mediaMovel:values.reduce((sum,v)=>sum+v,0)/values.length};
+    });
+  };
 
   const charts=[
     {label:"Receita total",key:"receita",color:C.navyMid,format:"money"},
@@ -1457,19 +1485,20 @@ function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributacao}){
   ];
 
   const renderChart=(ch)=>{
-    let chartData=data;
-    if(ch.key==="melhorMes") chartData=data.map(d=>({...d,melhorMes:d.isMelhor?d.lucro:0}));
-    else if(ch.key==="piorMes") chartData=data.map(d=>({...d,piorMes:d.isPior?d.lucro:0}));
-    else if(ch.key==="evolucao") chartData=data.map((d,i)=>({...d,evolucao:i===0?0:d.receita-data[i-1].receita}));
+    let chartData=active;
+    if(ch.key==="melhorMes") chartData=active.map(d=>({...d,melhorMes:d.isMelhor?d.lucro:0}));
+    else if(ch.key==="piorMes") chartData=active.map(d=>({...d,piorMes:d.isPior?d.lucro:0}));
+    else if(ch.key==="evolucao") chartData=active.map((d,i)=>({...d,evolucao:i===0?0:d.receita-active[i-1].receita}));
+    chartData=withMovingAverage(chartData,ch.key);
 
     const total=ch.key==="evolucao"
       ? chartData.reduce((s,d)=>s+d.evolucao,0)
       : chartData.reduce((s,d)=>s+Number(d[ch.key]||0),0);
     const avg=ch.format==="percent"
-      ? data.length?data.reduce((s,d)=>s+Number(d[ch.key]||0),0)/data.length:0
+      ? chartData.length?chartData.reduce((s,d)=>s+Number(d[ch.key]||0),0)/chartData.length:0
       : ch.key==="mediaReceitaAcumulada"
-        ? (data[data.length-1]?.mediaReceitaAcumulada || 0)
-        : total/12;
+        ? (active[active.length-1]?.mediaReceitaAcumulada || 0)
+        : chartData.length?total/chartData.length:0;
     const headlineValue=ch.key==="mediaReceitaAcumulada"
       ? fmtBRL(avg)
       : ch.format==="percent"
@@ -1490,7 +1519,7 @@ function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributacao}){
           </div>
         </div>
         <ResponsiveContainer width="100%" height={180}>
-          <BarChart data={chartData} margin={{top:8,right:8,left:-8,bottom:0}}>
+          <ComposedChart data={chartData} margin={{top:8,right:8,left:-8,bottom:0}}>
             <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE3" vertical={false}/>
             <XAxis dataKey="mes" tick={{fontSize:10,fill:C.muted}} axisLine={false} tickLine={false}/>
             <YAxis
@@ -1501,12 +1530,15 @@ function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributacao}){
               width={48}
             />
             <Tooltip
-              formatter={(v)=>[ch.format==="percent"?pct(v):fmtBRL(v)]}
+              formatter={(v,name)=>[
+                ch.format==="percent"?pct(v):fmtBRL(v),
+                name==="mediaMovel"?"Média móvel (3)":ch.label
+              ]}
               contentStyle={tooltipStyle}
               labelStyle={{color:C.text,fontWeight:"600"}}
             />
             {ch.key==="mediaReceitaAcumulada" && (
-              <ReferenceLine y={data.length?data[data.length-1].mediaReceitaAcumulada:0} stroke={ch.color} strokeDasharray="5 4" strokeWidth={1.5}/>
+              <ReferenceLine y={active.length?active[active.length-1].mediaReceitaAcumulada:0} stroke={ch.color} strokeDasharray="5 4" strokeWidth={1.5}/>
             )}
             {ch.format==="percent" && <ReferenceLine y={0} stroke="#AAA"/>}
             <Bar
@@ -1520,11 +1552,12 @@ function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributacao}){
               }}
               style={{cursor:ch.clickTax?"pointer":"default"}}
             >
-              {(ch.highlight==="best" ? chartData : ch.highlight==="worst" ? chartData : []).map((d,i)=>(
+              {(ch.highlight==="best" || ch.highlight==="worst") ? chartData.map((d,i)=>(
                 <Cell key={i} fill={d.isMelhor&&ch.highlight==="best" ? "#2E7D32" : d.isPior&&ch.highlight==="worst" ? C.red : ch.color}/>
-              ))}
+              )) : null}
             </Bar>
-          </BarChart>
+            <Line type="monotone" dataKey="mediaMovel" stroke="#6C7A89" strokeWidth={2} dot={false} activeDot={{r:3}}/>
+          </ComposedChart>
         </ResponsiveContainer>
         {ch.key==="melhorMes" && <p style={{margin:"8px 0 0",fontSize:11,color:C.muted}}>Melhor mês: <strong>{best?.mes || "—"}</strong>{best ? ` · ${fmtBRL(best.lucro)}` : ""}</p>}
         {ch.key==="piorMes" && <p style={{margin:"8px 0 0",fontSize:11,color:C.muted}}>Pior mês: <strong>{worst?.mes || "—"}</strong>{worst ? ` · ${fmtBRL(worst.lucro)}` : ""}</p>}
@@ -1533,10 +1566,10 @@ function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributacao}){
     );
   };
 
-  const groupedData=data.map(d=>({...d,receita:d.receita,despesa:d.despesa,lucro:d.lucro}));
+  const groupedData=withMovingAverage(active,"receita").map((d,i)=>({...d,receitaMediaMovel:d.mediaMovel,despesaMediaMovel:0,lucroMediaMovel:0})).map((d,i,arr)=>{ const w=arr.slice(Math.max(0,i-2),i+1); return {...d,despesaMediaMovel:w.reduce((s,x)=>s+x.despesa,0)/w.length,lucroMediaMovel:w.reduce((s,x)=>s+x.lucro,0)/w.length}; });
 
   return(<>
-    <ReportButton />
+    <ReportButton onGenerate={() => generateAnnualReportPdf({ year, rows: data })} />
     <p style={{margin:"0 0 14px",fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase"}}>Dados Anuais · {year}</p>
     {charts.map(renderChart)}
     <div style={{background:"white",borderRadius:18,padding:"18px",marginBottom:12,boxShadow:"0 2px 16px rgba(0,0,0,0.06)"}}>
@@ -1545,21 +1578,24 @@ function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributacao}){
         <p style={{margin:0,fontSize:14,fontWeight:"bold",color:C.navyMid}}>{fmtBRL(data.reduce((s,d)=>s+d.lucro,0))}</p>
       </div>
       <ResponsiveContainer width="100%" height={200}>
-        <BarChart data={groupedData} margin={{top:8,right:8,left:-8,bottom:0}}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE3" vertical={false}/>
-          <XAxis dataKey="mes" tick={{fontSize:10,fill:C.muted}} axisLine={false} tickLine={false}/>
-          <YAxis tick={{fontSize:9,fill:C.muted}} tickFormatter={fmtK} axisLine={false} tickLine={false} width={48}/>
-          <Tooltip
-            formatter={(v,n)=>[fmtBRL(v),n==="receita"?"Receita":n==="despesa"?"Despesa":"Lucro"]}
-            contentStyle={tooltipStyle}
-            labelStyle={{color:C.text,fontWeight:"600"}}
-          />
-          <Bar dataKey="receita" fill={C.navyMid} radius={[4,4,0,0]} maxBarSize={18}/>
-          <Bar dataKey="despesa" fill={C.red} radius={[4,4,0,0]} maxBarSize={18}/>
-          <Bar dataKey="lucro" fill="#2E7D32" radius={[4,4,0,0]} maxBarSize={18}/>
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
+         <ComposedChart data={groupedData} margin={{top:8,right:8,left:-8,bottom:0}}>
+           <CartesianGrid strokeDasharray="3 3" stroke="#F0EBE3" vertical={false}/>
+           <XAxis dataKey="mes" tick={{fontSize:10,fill:C.muted}} axisLine={false} tickLine={false}/>
+           <YAxis tick={{fontSize:9,fill:C.muted}} tickFormatter={fmtK} axisLine={false} tickLine={false} width={48}/>
+           <Tooltip
+             formatter={(v,n)=>[fmtBRL(v),n==="receita"?"Receita":n==="despesa"?"Despesa":n==="lucro"?"Lucro":n==="receitaMediaMovel"?"Média móvel receita":n==="despesaMediaMovel"?"Média móvel despesa":"Média móvel lucro"]}
+             contentStyle={tooltipStyle}
+             labelStyle={{color:C.text,fontWeight:"600"}}
+           />
+           <Bar dataKey="receita" fill={C.navyMid} radius={[4,4,0,0]} maxBarSize={18}/>
+           <Bar dataKey="despesa" fill={C.red} radius={[4,4,0,0]} maxBarSize={18}/>
+           <Bar dataKey="lucro" fill="#2E7D32" radius={[4,4,0,0]} maxBarSize={18}/>
+           <Line type="monotone" dataKey="receitaMediaMovel" stroke={C.navyMid} strokeWidth={2} dot={false}/>
+           <Line type="monotone" dataKey="despesaMediaMovel" stroke={C.red} strokeWidth={2} dot={false}/>
+           <Line type="monotone" dataKey="lucroMediaMovel" stroke="#2E7D32" strokeWidth={2} dot={false}/>
+         </ComposedChart>
+       </ResponsiveContainer>
+     </div>
 
     {taxDetail && (
       <Modal onClose={()=>setTaxDetail(null)}>
