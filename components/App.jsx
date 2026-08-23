@@ -1146,7 +1146,7 @@ export default function App() {
 
           <div style={{display:"grid",gap:10}}>
             <button
-              onClick={()=>setShowFavorites(true)}
+              onClick={()=>{setShowSettings(false);setShowFavorites(true);}}
               style={{width:"100%",background:"white",border:`1px solid ${C.border}`,borderRadius:14,padding:"16px",color:C.navyMid,fontFamily:"inherit",fontSize:14,fontWeight:"700",cursor:"pointer",textAlign:"left"}}
             >
               <div style={{fontSize:15,marginBottom:4}}>⭐ Favoritos</div>
@@ -1439,7 +1439,7 @@ function StatTab({monthTxs,receitas,despesas,month,year,MONTHS,C,fmtV,setDrillMo
       month,
       monthLabel: MONTHS[month],
       stats,
-      taxes: { das: DAS, inss: INSS, irrf: IRRF, contabilidade: CTB },
+      taxes: { das: DAS, inss: INSS, irrf: IRRF, contabilidade: CTB, proLabore: PLef },
       transactions: monthTxs,
     })} />
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
