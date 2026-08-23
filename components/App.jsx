@@ -119,6 +119,20 @@ async function cascadePL(txs, manual = {}) {
   return map;
 }
 
+/* ─── Ordenação estável ───────────────────────────── */
+const sortTransactions = list => [...(Array.isArray(list) ? list : [])].sort((a,b)=>{
+  const da=String(a?.data||"");
+  const db=String(b?.data||"");
+  if(da!==db) return db.localeCompare(da);
+  return String(b?.id||"").localeCompare(String(a?.id||""));
+});
+
+const sortFavorites = list => [...(Array.isArray(list) ? list : [])].sort((a,b)=>{
+  const na=String(a?.nome||"").trim();
+  const nb=String(b?.nome||"").trim();
+  return na.localeCompare(nb,"pt-BR",{sensitivity:"base",numeric:true});
+});
+
 /* ══════════════════════════════════════════════════ */
 export default function App() {
   const now=new Date();
@@ -145,6 +159,8 @@ export default function App() {
   const [newPassword,setNewPassword]=useState("");
   const [confirmPassword,setConfirmPassword]=useState("");
   const [showTaxation,setShowTaxation]=useState(false);
+  const [showFavorites,setShowFavorites]=useState(false);
+  const [favoriteEdit,setFavoriteEdit]=useState(null);
   const [accountActionBusy,setAccountActionBusy]=useState(false);
   const importFileRef = useRef(null);
   const [hideVal,setHideVal]=useState(false);
@@ -154,8 +170,8 @@ export default function App() {
 
   useEffect(()=>{
     (async()=>{
-      const t=await sGet("pj_tx2")||[];
-      const fv=await sGet("pj_favs2")||[];
+      const t=sortTransactions(await sGet("pj_tx2")||[]);
+      const fv=sortFavorites(await sGet("pj_favs2")||[]);
       const pl=await sGet("pj_pl")||{};
       const pm=await sGet("pj_plm")||{};
       const ct=await sGet("pj_ctb")||{};
@@ -201,7 +217,7 @@ export default function App() {
 
   /* ── Derived ── */
   const financeMonth = calculateMonthlyFinance(txs, year, month);
-  const monthTxs = financeMonth.lancamentos;
+  const monthTxs = sortTransactions(financeMonth.lancamentos);
   const receitas = financeMonth.receitas;
   const despesas = financeMonth.despesas;
   const distribuicoes = financeMonth.distribuicoes || 0;
@@ -262,13 +278,13 @@ export default function App() {
 
   /* ── Savers ── */
   const saveTxs=async d=>{
-    setTxs(d); await sSet("pj_tx2",d);
-    const fresh=await sGet("pj_pl")||{};
+    const sorted=sortTransactions(d);
+    setTxs(sorted); await sSet("pj_tx2",sorted);
     const freshM=await sGet("pj_plm")||{};
     const up=await cascadePL(d,freshM);
     setPlMap(up);
   };
-  const saveFavs=async d=>{setFavs(d);await sSet("pj_favs2",d);};
+  const saveFavs=async d=>{const sorted=sortFavorites(d);setFavs(sorted);await sSet("pj_favs2",sorted);};
   const saveCtb=async d=>{setCtbMap(d);await sSet("pj_ctb",d);};
   const saveIrrf=async d=>{setIrrfMap(d);await sSet("pj_irrf",d);};
   const commitIrrf=async()=>{ const v=parseBRL(irrfIn); await saveIrrf({...irrfMap,[plKey]:v>0?v:0}); };
@@ -327,6 +343,39 @@ export default function App() {
     if(fav.tipo==="receita") setForm(f=>({...f,nome:fav.nome,cnpj:fav.cnpj||"",telefone:fav.telefone||"",cep:fav.cep||"",endereco:fav.endereco||"",email:fav.email||"",especialidade:fav.especialidade||"",categoria:fav.categoria||""}));
     else setForm(f=>({...f,categoria:fav.nome}));
     setShowFavPick(false);
+  };
+
+  const openFavoriteEdit = fav => {
+    setFavoriteEdit({ ...fav });
+  };
+
+  const saveFavoriteEdit = async () => {
+    if (!favoriteEdit) return;
+    const name = String(favoriteEdit.nome || "").trim();
+    if (!name) { notify("Informe o nome do Favorito.","err"); return; }
+    const duplicate = favs.find(f => f.id !== favoriteEdit.id && f.tipo === favoriteEdit.tipo && String(f.nome || "").trim().localeCompare(name,"pt-BR",{sensitivity:"base"}) === 0);
+    if (duplicate) { notify("Já existe um Favorito com esse nome.","err"); return; }
+    const updated = favs.map(f => f.id === favoriteEdit.id ? {
+      ...f,
+      nome: name,
+      cnpj: favoriteEdit.cnpj || "",
+      telefone: favoriteEdit.telefone || "",
+      cep: favoriteEdit.cep || "",
+      endereco: favoriteEdit.endereco || "",
+      email: favoriteEdit.email || "",
+      especialidade: favoriteEdit.especialidade || "",
+      categoria: favoriteEdit.tipo === "despesa" ? name : (favoriteEdit.categoria || ""),
+    } : f);
+    await saveFavs(updated);
+    setFavoriteEdit(null);
+    notify("Favorito atualizado!");
+  };
+
+  const deleteFavorite = async id => {
+    if (!window.confirm("Excluir este Favorito?\n\nO lançamento salvo não será excluído.")) return;
+    await saveFavs(favs.filter(f => f.id !== id));
+    setFavoriteEdit(null);
+    notify("Favorito excluído.");
   };
 
   /* ── Export/Import ── */
@@ -602,7 +651,7 @@ export default function App() {
     }
   };
 
-  const favsAtt=formTipo==="receita"?favs.filter(f=>f.tipo==="receita"):favs.filter(f=>f.tipo==="despesa");
+  const favsAtt=sortFavorites(formTipo==="receita"?favs.filter(f=>f.tipo==="receita"):favs.filter(f=>f.tipo==="despesa"));
   const fmtMoney=v=>hideVal?"R$ ···":fmtBRL(v);
   const fmtV=fmtMoney;
   const openTaxation=()=>setShowTaxation(true);
@@ -1017,6 +1066,76 @@ export default function App() {
         </Modal>
       )}
 
+      {/* Favorites Modal */}
+      {showFavorites && (
+        <Modal onClose={()=>setShowFavorites(false)}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+            <div>
+              <h2 style={{margin:0,fontSize:18,color:C.navy,fontWeight:"normal"}}>⭐ Favoritos</h2>
+              <p style={{margin:"4px 0 0",fontSize:11,color:C.muted}}>{favs.length} {favs.length===1?"favorito":"favoritos"} · ordem alfabética</p>
+            </div>
+            <CloseBtn onClick={()=>setShowFavorites(false)}/>
+          </div>
+          {favs.length===0 ? (
+            <div style={{textAlign:"center",padding:"30px 0",color:"#CCC"}}>
+              <p style={{fontSize:34,margin:0}}>⭐</p>
+              <p style={{margin:"8px 0 0",fontSize:13}}>Nenhum Favorito salvo.</p>
+            </div>
+          ) : sortFavorites(favs).map(fav=>(
+            <div key={fav.id} style={{background:"white",borderRadius:14,padding:"13px 14px",marginBottom:9,border:`1px solid ${C.border}`,boxShadow:"0 1px 7px rgba(0,0,0,0.04)"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+                <div style={{minWidth:0}}>
+                  <p style={{margin:0,fontSize:14,fontWeight:"700",color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{fav.nome}</p>
+                  <p style={{margin:"3px 0 0",fontSize:10,color:fav.tipo==="receita"?C.navyMid:C.red}}>{fav.tipo==="receita"?"Receita":"Despesa"}</p>
+                </div>
+                <div style={{display:"flex",gap:7,flexShrink:0}}>
+                  <button onClick={()=>openFavoriteEdit(fav)} style={{background:C.navyLight,border:"none",borderRadius:9,padding:"8px 10px",color:C.navyMid,fontFamily:"inherit",fontSize:12,fontWeight:"700",cursor:"pointer"}}>✏️ Editar</button>
+                  <button onClick={()=>deleteFavorite(fav.id)} style={{background:C.redLight,border:"none",borderRadius:9,padding:"8px 10px",color:C.red,fontFamily:"inherit",fontSize:12,fontWeight:"700",cursor:"pointer"}}>🗑</button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </Modal>
+      )}
+
+      {/* Favorite Editor Modal */}
+      {favoriteEdit && (
+        <Modal onClose={()=>setFavoriteEdit(null)}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+            <div>
+              <h2 style={{margin:0,fontSize:18,color:C.navy,fontWeight:"normal"}}>✏️ Editar Favorito</h2>
+              <p style={{margin:"4px 0 0",fontSize:11,color:C.muted}}>{favoriteEdit.tipo==="receita"?"Receita":"Despesa"}</p>
+            </div>
+            <CloseBtn onClick={()=>setFavoriteEdit(null)}/>
+          </div>
+          <Field label={favoriteEdit.tipo==="receita"?"Nome da Clínica *":"Tipo de Despesa *"}>
+            <input value={favoriteEdit.nome||""} onChange={e=>setFavoriteEdit(f=>({...f,nome:e.target.value}))} style={iSt}/>
+          </Field>
+          {favoriteEdit.tipo==="receita" && <>
+            <Field label="Especialidade">
+              <div style={{display:"flex",gap:8}}>
+                {ESPS.map(esp=><button key={esp} onClick={()=>setFavoriteEdit(f=>({...f,especialidade:f.especialidade===esp?"":esp}))} style={{flex:1,padding:"11px",borderRadius:12,border:`2px solid ${favoriteEdit.especialidade===esp?C.navyMid:C.border}`,background:favoriteEdit.especialidade===esp?C.navyLight:"white",color:favoriteEdit.especialidade===esp?C.navyMid:"#AAA",fontFamily:"inherit",fontSize:13,fontWeight:"600",cursor:"pointer"}}>{esp}</button>)}
+              </div>
+            </Field>
+            <Field label="CPF / CNPJ"><input value={favoriteEdit.cnpj||""} onChange={e=>setFavoriteEdit(f=>({...f,cnpj:fmtDoc(e.target.value)}))} inputMode="numeric" style={iSt}/></Field>
+            <Field label="Telefone"><input value={favoriteEdit.telefone||""} onChange={e=>setFavoriteEdit(f=>({...f,telefone:formatPhone(e.target.value)}))} inputMode="tel" style={iSt}/></Field>
+            <Field label="CEP"><input value={favoriteEdit.cep||""} onChange={e=>setFavoriteEdit(f=>({...f,cep:formatCep(e.target.value)}))} inputMode="numeric" style={iSt}/></Field>
+            <Field label="Endereço"><input value={favoriteEdit.endereco||""} onChange={e=>setFavoriteEdit(f=>({...f,endereco:e.target.value}))} style={iSt}/></Field>
+            <Field label="E-mail"><input value={favoriteEdit.email||""} onChange={e=>setFavoriteEdit(f=>({...f,email:e.target.value}))} inputMode="email" style={iSt}/></Field>
+            <Field label="Descrição da Receita">
+              <select value={favoriteEdit.categoria||""} onChange={e=>setFavoriteEdit(f=>({...f,categoria:e.target.value}))} style={{...iSt,color:favoriteEdit.categoria?C.text:"#AAA"}}>
+                <option value="">Selecione...</option>
+                {TIPOS_REC.map(t=><option key={t} value={t}>{t}</option>)}
+              </select>
+            </Field>
+          </>}
+          <div style={{display:"flex",gap:8,marginTop:4}}>
+            <button onClick={saveFavoriteEdit} style={{flex:1,background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,border:"none",borderRadius:14,padding:"14px",color:"white",fontFamily:"inherit",fontSize:14,fontWeight:"700",cursor:"pointer"}}>Salvar alterações</button>
+            <button onClick={()=>deleteFavorite(favoriteEdit.id)} style={{background:C.redLight,border:`1px solid ${C.red}`,borderRadius:14,padding:"14px",color:C.red,fontFamily:"inherit",fontSize:14,fontWeight:"700",cursor:"pointer"}}>Excluir</button>
+          </div>
+        </Modal>
+      )}
+
       {/* Settings Modal */}
       {showSettings && (
         <Modal onClose={()=>setShowSettings(false)}>
@@ -1026,6 +1145,14 @@ export default function App() {
           </div>
 
           <div style={{display:"grid",gap:10}}>
+            <button
+              onClick={()=>setShowFavorites(true)}
+              style={{width:"100%",background:"white",border:`1px solid ${C.border}`,borderRadius:14,padding:"16px",color:C.navyMid,fontFamily:"inherit",fontSize:14,fontWeight:"700",cursor:"pointer",textAlign:"left"}}
+            >
+              <div style={{fontSize:15,marginBottom:4}}>⭐ Favoritos</div>
+              <div style={{fontSize:11,fontWeight:"normal",color:C.muted,lineHeight:1.45}}>Editar ou excluir os favoritos salvos, em ordem alfabética.</div>
+            </button>
+
             <button
               onClick={doExport}
               style={{width:"100%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,border:"none",borderRadius:14,padding:"16px",color:"white",fontFamily:"inherit",fontSize:14,fontWeight:"700",cursor:"pointer",textAlign:"left"}}
