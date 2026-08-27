@@ -175,7 +175,15 @@ export default function App() {
       const pl=await sGet("pj_pl")||{};
       const pm=await sGet("pj_plm")||{};
       const ct=await sGet("pj_ctb")||{};
-      const irrf=await sGet("pj_irrf")||{};
+      const storedIrrf=await sGet("pj_irrf")||{};
+      // IRRF manual só existe quando há um valor efetivamente informado.
+      // Zeros antigos não podem sobrescrever o cálculo automático de 2026.
+      const irrf=Object.fromEntries(
+        Object.entries(storedIrrf).filter(([, value]) => Number(value) > 0)
+      );
+      if (JSON.stringify(irrf) !== JSON.stringify(storedIrrf)) {
+        await sSet("pj_irrf", irrf);
+      }
       // Os valores da contabilidade são semeados apenas em um estado
       // já existente do usuário. Assim, "Excluir Todos os Dados" realmente
       // deixa a conta sem dados e não recria valores automaticamente.
@@ -254,10 +262,11 @@ export default function App() {
 
   const IRRFautoData = calcIRRF(PLef, { inss: INSS });
   const IRRFauto = IRRFautoData.valor;
-  const hasManualIRRF = Object.prototype.hasOwnProperty.call(irrfMap, plKey);
-  const IRRFef = hasManualIRRF
-    ? Math.max(0, Number(irrfMap[plKey]) || 0)
-    : IRRFauto;
+  // O cálculo automático de 2026 é a regra padrão. Um override manual só
+  // deve existir quando houver um valor positivo salvo pelo usuário.
+  const manualIRRF = Number(irrfMap?.[plKey]);
+  const hasManualIRRF = Number.isFinite(manualIRRF) && manualIRRF > 0;
+  const IRRFef = hasManualIRRF ? manualIRRF : IRRFauto;
 
   const totalObrig = DAS + INSS + CTB + IRRFef;
 
@@ -287,7 +296,17 @@ export default function App() {
   const saveFavs=async d=>{const sorted=sortFavorites(d);setFavs(sorted);await sSet("pj_favs2",sorted);};
   const saveCtb=async d=>{setCtbMap(d);await sSet("pj_ctb",d);};
   const saveIrrf=async d=>{setIrrfMap(d);await sSet("pj_irrf",d);};
-  const commitIrrf=async()=>{ const v=parseBRL(irrfIn); await saveIrrf({...irrfMap,[plKey]:v>0?v:0}); };
+  const commitIrrf=async()=>{
+    const v=parseBRL(irrfIn);
+    const next={...irrfMap};
+    if(v>0){
+      next[plKey]=v;
+    } else {
+      // Campo vazio/zero remove o override e devolve o cálculo automático.
+      delete next[plKey];
+    }
+    await saveIrrf(next);
+  };
 
   const notify=(msg,type="ok")=>{setToast({msg,type});setTimeout(()=>setToast(null),2800);};
 
