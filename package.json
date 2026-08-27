@@ -21,7 +21,7 @@
   "devDependencies": {
     "eslint": "^9.39.4",
     "eslint-config-next": "^16.3.3",
-    "vitest": "^3.2.7"
+    "vitest": "^4.1.11"
   },
   "allowScripts": {
     "esbuild@0.28.2": true,
