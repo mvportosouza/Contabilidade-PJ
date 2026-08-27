@@ -16,7 +16,7 @@ import {
   calcTributacao,
   SALARIO_MINIMO_2026,
 } from "../lib/taxes";
-import { PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine, ComposedChart, Line } from "recharts";
+import { PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine, ComposedChart, Line } from "recharts";
 
 /* ─── Logo ─────────────────────────────────────── */
 const LOGO = "/assets/logo-horizontal.jpeg";
