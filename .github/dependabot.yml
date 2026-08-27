@@ -14,8 +14,8 @@ updates:
     commit-message:
       prefix: deps
 
-    # Major versions of these packages must be upgraded
-    # together and tested as a dedicated compatibility batch.
+    # Major versions destes pacotes devem ser atualizadas
+    # juntas e testadas como um lote dedicado de compatibilidade.
     ignore:
       - dependency-name: next
         update-types:
@@ -30,6 +30,10 @@ updates:
           - version-update:semver-major
 
       - dependency-name: recharts
+        update-types:
+          - version-update:semver-major
+
+      - dependency-name: eslint
         update-types:
           - version-update:semver-major
 
