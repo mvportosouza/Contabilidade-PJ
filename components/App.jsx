@@ -1,4 +1,5 @@
 'use client';
+import Image from "next/image";
 import { useState, useEffect, useRef } from "react";
 import { deleteAllAppData, sGet, sSet, clearStorageCache } from "../lib/storage";
 import { updatePassword } from "../lib/auth";
@@ -691,7 +692,14 @@ export default function App() {
       <div className="app-header" style={{background:"linear-gradient(180deg,#0F1E35,#1A3055)",position:"sticky",top:0,zIndex:30,boxShadow:"0 2px 12px rgba(0,0,0,0.2)"}}>
         <div style={{height:2,background:"linear-gradient(90deg,transparent,#C8A96E,transparent)"}}/>
         <div style={{display:"flex",justifyContent:"center",padding:"14px 16px 10px"}}>
-          <img src={LOGO} alt="Marcus Vinícius" style={{height:72,maxWidth:"85%",objectFit:"contain",filter:"drop-shadow(0 2px 8px rgba(0,0,0,0.4))"}}/>
+          <Image
+            src={LOGO}
+            alt="Marcus Vinícius"
+            width={1774}
+            height={473}
+            priority
+            style={{height:72,width:"auto",maxWidth:"85%",objectFit:"contain",filter:"drop-shadow(0 2px 8px rgba(0,0,0,0.4))"}}
+          />
         </div>
         <div style={{height:1,background:"linear-gradient(90deg,transparent,rgba(200,169,110,0.4),transparent)",margin:"0 20px"}}/>
         <div style={{display:"flex",gap:8,padding:"10px 16px 14px",alignItems:"center"}}>

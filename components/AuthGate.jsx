@@ -1,3 +1,4 @@
+import Image from 'next/image'
 import { useEffect, useState } from 'react'
 import {
   getSession,
@@ -356,11 +357,12 @@ export default function AuthGate({ children }) {
           style={styles.card}
         >
           <div style={styles.logo}>
-            <img
+            <Image
               src="/assets/logo-square.png"
               alt="Marcus Vinícius Porto Souza"
               width={58}
               height={58}
+              priority
               style={styles.logoImage}
             />
           </div>
@@ -427,11 +429,12 @@ export default function AuthGate({ children }) {
           style={styles.card}
         >
           <div style={styles.logo}>
-            <img
+            <Image
               src="/assets/logo-square.png"
               alt="Marcus Vinícius Porto Souza"
               width={58}
               height={58}
+              priority
               style={styles.logoImage}
             />
           </div>
@@ -514,11 +517,12 @@ export default function AuthGate({ children }) {
           style={styles.card}
         >
           <div style={styles.logo}>
-            <img
+            <Image
               src="/assets/logo-square.png"
               alt="Marcus Vinícius Porto Souza"
               width={58}
               height={58}
+              priority
               style={styles.logoImage}
             />
           </div>
