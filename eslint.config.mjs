@@ -1,14 +1,13 @@
 import { defineConfig, globalIgnores } from 'eslint/config'
-import espree from 'espree'
+import * as espree from 'espree'
 import nextVitals from 'eslint-config-next/core-web-vitals'
 
 export default defineConfig([
   ...nextVitals,
 
-  // ESLint 10 requires the parser's ScopeManager to implement addGlobals().
-  // eslint-config-next 16.3.3 still uses Next's compiled Babel parser for
-  // JavaScript/JSX, which does not expose that API. Use Espree for JS/JSX;
-  // TypeScript files keep the typescript-eslint parser from nextVitals.
+  // Use Espree for JavaScript/JSX files.
+  // ESLint 10 requires a ScopeManager with addGlobals(), which the
+  // compiled Babel parser bundled by eslint-config-next 16.3.3 does not provide.
   {
     files: ['**/*.{js,jsx,mjs,cjs}'],
     languageOptions: {
