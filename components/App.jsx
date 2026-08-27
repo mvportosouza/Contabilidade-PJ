@@ -3,7 +3,7 @@ import Image from "next/image";
 import { useState, useEffect, useRef } from "react";
 import { deleteAllAppData, sGet, sSet, clearStorageCache } from "../lib/storage";
 import { updatePassword } from "../lib/auth";
-import { ACCOUNTING_PL_BY_MONTH } from "../lib/accounting";
+import { ACCOUNTING_PL_BY_MONTH, reconcileLegacyAccountingPL } from "../lib/accounting";
 import { supabase } from "../lib/supabaseClient";
 import { BACKUP_VERSION, cryptoId, normalizeBackup, normalizeDateOnly } from "../lib/validators";
 import { calculateMonthlyFinance, calculateAccumulatedCash } from "../lib/finance";
@@ -174,7 +174,11 @@ export default function App() {
       const t=sortTransactions(await sGet("pj_tx2")||[]);
       const fv=sortFavorites(await sGet("pj_favs2")||[]);
       const pl=await sGet("pj_pl")||{};
-      const pm=await sGet("pj_plm")||{};
+      const pmStored=await sGet("pj_plm")||{};
+      const pm=reconcileLegacyAccountingPL(pmStored);
+      if (JSON.stringify(pm) !== JSON.stringify(pmStored)) {
+        await sSet("pj_plm", pm);
+      }
       const ct=await sGet("pj_ctb")||{};
       const storedIrrf=await sGet("pj_irrf")||{};
       // IRRF manual só existe quando há um valor efetivamente informado.
@@ -185,7 +189,7 @@ export default function App() {
       if (JSON.stringify(irrf) !== JSON.stringify(storedIrrf)) {
         await sSet("pj_irrf", irrf);
       }
-      // Os valores da contabilidade são semeados apenas em um estado
+      // Os valores de referência são semeados apenas em um estado
       // já existente do usuário. Assim, "Excluir Todos os Dados" realmente
       // deixa a conta sem dados e não recria valores automaticamente.
       const seededPL = t.length > 0
