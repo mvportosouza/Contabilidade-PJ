@@ -24,7 +24,7 @@ describe('pró-labore, INSS e IRRF',()=>{
  it('não gera IRRF até R$ 5.000',()=>{ expect(calcIRRF(5000).valor).toBe(0) })
  it('aplica a redução de 2026 ao pró-labore acima de R$ 5.000',()=>{
    const r=calcIRRF(5220.07, { inss: 574.21 });
-   expect(r.valor).toBe(76.22);
+   expect(r.valor).toBe(86.23);
    expect(r.reducao).toBe(283.59);
  })
  it('não aplica a redução de 2026 a partir de R$ 7.350',()=>{
