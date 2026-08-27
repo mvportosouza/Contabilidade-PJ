@@ -22,5 +22,14 @@ describe('pró-labore, INSS e IRRF',()=>{
  it('não recomenda abaixo do salário mínimo 2026',()=>{ expect(calcRecommendedPL([tx('2026-01-15',1000)],{},2026,0)).toBeGreaterThanOrEqual(SALARIO_MINIMO_2026) })
  it('limita INSS ao teto',()=>{ expect(calcINSS(INSS_TETO_2026*2)).toBeCloseTo(INSS_TETO_2026*.11,2) })
  it('não gera IRRF até R$ 5.000',()=>{ expect(calcIRRF(5000).valor).toBe(0) })
+ it('aplica a redução de 2026 ao pró-labore acima de R$ 5.000',()=>{
+   const r=calcIRRF(5220.07, { inss: 574.21 });
+   expect(r.valor).toBe(76.22);
+   expect(r.reducao).toBe(283.59);
+ })
+ it('não aplica a redução de 2026 a partir de R$ 7.350',()=>{
+   const r=calcIRRF(7350, { inss: 808.50 });
+   expect(r.reducao).toBe(0);
+ })
  it('nunca retorna base ou imposto negativos',()=>{ const r=calcIRRF(2000); expect(r.base).toBeGreaterThanOrEqual(0); expect(r.valor).toBeGreaterThanOrEqual(0) })
 })
