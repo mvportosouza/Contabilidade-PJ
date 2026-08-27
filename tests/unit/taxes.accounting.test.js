@@ -76,7 +76,7 @@ describe('Pró-labore — metodologia da contabilidade', () => {
     const contabilOriginal = 5908.26
     const diferenca = Math.abs(contabilOriginal - calculado)
 
-    expect(diferenca).toBe(24.65)
+    expect(diferenca).toBeCloseTo(24.65, 2)
     expect(diferenca / contabilOriginal).toBeLessThan(0.01)
   })
 })
