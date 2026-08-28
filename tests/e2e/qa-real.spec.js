@@ -105,25 +105,16 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
       .first()
     await expect(favoriteField).toBeVisible({ timeout: 10_000 })
 
-    // ChkBox is a custom visual control (not a native input). Trigger the
-    // actual child control directly and wait for React to commit the checked
-    // state before submitting the form. This avoids races with label bubbling
-    // and does not depend on the check-mark glyph.
+    // ChkBox é um controle visual React (não é input nativo). Use o
+    // clique real do Playwright para disparar o handler React onClick.
+    // dispatchEvent() sintético pode não reproduzir corretamente a sequência
+    // de eventos usada pelo React/browser neste componente.
     const favoriteBox = favoriteField.locator(':scope > div').first()
     await expect(favoriteBox).toBeVisible({ timeout: 10_000 })
-    await favoriteBox.evaluate((el) => {
-      el.dispatchEvent(new MouseEvent('click', {
-        bubbles: true,
-        cancelable: true,
-        view: window,
-      }))
+    await favoriteBox.click()
+    await expect(favoriteBox).toHaveCSS('background-color', 'rgb(26, 48, 85)', {
+      timeout: 5_000,
     })
-    await expect
-      .poll(
-        () => favoriteBox.evaluate((el) => getComputedStyle(el).backgroundColor),
-        { timeout: 5_000, intervals: [100, 250, 500] },
-      )
-      .toBe('rgb(26, 48, 85)')
   }
 
   const submitName =
