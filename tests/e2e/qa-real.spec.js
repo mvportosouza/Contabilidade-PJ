@@ -104,11 +104,26 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
       .filter({ hasText: /^Salvar nos favoritos$/ })
       .first()
     await expect(favoriteField).toBeVisible({ timeout: 10_000 })
+
+    // ChkBox is a custom visual control (not a native input). Trigger the
+    // actual child control directly and wait for React to commit the checked
+    // state before submitting the form. This avoids races with label bubbling
+    // and does not depend on the check-mark glyph.
     const favoriteBox = favoriteField.locator(':scope > div').first()
-    await favoriteBox.click()
-    // The visual ChkBox is an implementation detail. The durable functional
-    // assertion is made below by checking that the saved favorite appears in
-    // the Favorites modal. Do not couple this E2E flow to the checkbox glyph.
+    await expect(favoriteBox).toBeVisible({ timeout: 10_000 })
+    await favoriteBox.evaluate((el) => {
+      el.dispatchEvent(new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+      }))
+    })
+    await expect
+      .poll(
+        () => favoriteBox.evaluate((el) => getComputedStyle(el).backgroundColor),
+        { timeout: 5_000, intervals: [100, 250, 500] },
+      )
+      .toBe('rgb(26, 48, 85)')
   }
 
   const submitName =
