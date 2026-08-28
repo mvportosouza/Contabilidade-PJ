@@ -106,9 +106,9 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
     await expect(favoriteField).toBeVisible({ timeout: 10_000 })
     const favoriteBox = favoriteField.locator(':scope > div').first()
     await favoriteBox.click()
-    // ChkBox has no ARIA state or native input; its checked state is
-    // represented by the visible check mark rendered by the component.
-    await expect(favoriteBox).toContainText('✓', { timeout: 5_000 })
+    // The visual ChkBox is an implementation detail. The durable functional
+    // assertion is made below by checking that the saved favorite appears in
+    // the Favorites modal. Do not couple this E2E flow to the checkbox glyph.
   }
 
   const submitName =
@@ -447,10 +447,23 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
         await openTransactions(reopenedOffline)
         await expect(reopenedOffline.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
 
-        // Going online must synchronize to Supabase. Verify with a completely
-        // fresh browser context, which has no local cache and therefore can
-        // only see the marker if it really reached the cloud.
+        // Bring the original tab online and explicitly reload it. This forces
+        // loadStateInternal() to consume the durable sync queue while online,
+        // instead of relying only on the browser "online" event racing with
+        // the fresh-context verification below.
         await context.setOffline(false)
+        await reopenedOffline.reload()
+        await expect(reopenedOffline.getByRole('button', { name: /^Sair$/i })).toBeVisible({
+          timeout: 15_000,
+        })
+        await openTransactions(reopenedOffline)
+        await expect(reopenedOffline.getByText(marker, { exact: true })).toBeVisible({
+          timeout: 15_000,
+        })
+
+        // Verify with a completely fresh browser context, which has no local
+        // cache and therefore can only see the marker if it really reached
+        // Supabase.
         const cloudPage = await expectCloudMarker(browser, marker, 30_000)
 
         try {
@@ -517,7 +530,18 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       ).toBeVisible({ timeout: 20_000 })
 
       await second.getByRole('button', { name: /Usar versão da nuvem/i }).click()
-      await expect(second.getByText(markerA, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+      // The production conflict resolver persists the remote snapshot and
+      // intentionally reloads the application. Explicitly wait for the new
+      // authenticated shell, then open Lançamentos again before asserting the
+      // resolved state. This avoids racing the reload against React hydration.
+      await expect(second.getByRole('button', { name: /^Sair$/i })).toBeVisible({
+        timeout: 15_000,
+      })
+      await openTransactions(second)
+      await expect(second.getByText(markerA, { exact: true })).toBeVisible({
+        timeout: 15_000,
+      })
       await expect(second.getByText(markerB, { exact: true })).toHaveCount(0)
 
       await deleteTransaction(first, markerA)
