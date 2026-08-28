@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { generateAnnualReportPdf, openPdfBlob } from "../../lib/pdf";
+import { generateAnnualReportPdf } from "../../lib/pdf";
 import { getAnnualStatistics } from "../../lib/statistics";
 import {
   ResponsiveContainer,
@@ -11,8 +11,10 @@ import {
   ComposedChart,
   Line,
   Tooltip,
+  Cell,
 } from "recharts";
-import { Modal, Card, SmLabel, MS, CloseBtn } from "../AppUI";
+import { Modal, Card, SmLabel, CloseBtn } from "../AppUI";
+import { ReportButton } from "../Reports/ReportButton";
 
 export function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributacao}){
   const MS=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];

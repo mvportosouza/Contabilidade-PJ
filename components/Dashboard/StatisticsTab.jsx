@@ -1,4 +1,5 @@
 import { generateMonthlyReportPdf } from "../../lib/pdf";
+import { PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer } from "recharts";
 import { getMonthlyStatistics } from "../../lib/statistics";
 import { ReportButton } from "../Reports/ReportButton";
 import { Card, SmLabel } from "../AppUI";
