@@ -101,10 +101,15 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
     // texto não aciona seu onClick. Clique no próprio quadrado do checkbox.
     const favoriteField = page
       .locator('label')
-      .filter({ hasText: 'Salvar nos favoritos' })
+      .filter({ hasText: /^Salvar nos favoritos$/ })
       .first()
     await expect(favoriteField).toBeVisible({ timeout: 10_000 })
-    await favoriteField.locator('div').first().click()
+    const favoriteBox = favoriteField.locator(':scope > div').first()
+    await favoriteBox.click()
+    await expect.poll(
+      async () => favoriteBox.evaluate((el) => getComputedStyle(el).backgroundColor),
+      { timeout: 5_000, intervals: [100, 250, 500] },
+    ).toBe('rgb(26, 48, 85)')
   }
 
   const submitName =
@@ -141,7 +146,7 @@ async function deleteTransaction(page, marker) {
   await expect(page.getByText(marker, { exact: true })).toHaveCount(0, { timeout: 10_000 })
 }
 
-async function waitForSyncedLocalSnapshot(page, timeoutMs = 15_000) {
+async function waitForRemoteSnapshot(page, timeoutMs = 15_000) {
   await page.waitForFunction(() => {
     const cache = Object.entries(localStorage).find(([key]) =>
       key.startsWith('pj_app_state_cache_v3_'),
@@ -150,14 +155,41 @@ async function waitForSyncedLocalSnapshot(page, timeoutMs = 15_000) {
 
     try {
       const envelope = JSON.parse(cache[1])
-      const queueExists = Object.keys(localStorage).some((key) =>
-        key.startsWith('pj_app_state_sync_queue_v2_'),
-      )
-      return Boolean(envelope?.remoteUpdatedAt) && envelope?.dirty === false && !queueExists
+      return Boolean(envelope?.remoteUpdatedAt)
     } catch {
       return false
     }
   }, null, { timeout: timeoutMs })
+}
+
+async function expectCloudMarker(browser, marker, timeoutMs = 30_000) {
+  const verificationContext = await browser.newContext()
+  const verificationPage = await verificationContext.newPage()
+
+  try {
+    const deadline = Date.now() + timeoutMs
+    let lastError = null
+
+    while (Date.now() < deadline) {
+      try {
+        await login(verificationPage)
+        await openTransactions(verificationPage)
+        if (await verificationPage.getByText(marker, { exact: true }).count()) {
+          return verificationPage
+        }
+      } catch (error) {
+        lastError = error
+      }
+
+      await verificationPage.reload().catch(() => {})
+      await verificationPage.waitForTimeout(750)
+    }
+
+    throw lastError || new Error(`O marcador ${marker} não foi encontrado na nuvem.`)
+  } catch (error) {
+    await verificationContext.close().catch(() => {})
+    throw error
+  }
 }
 
 async function waitForActiveServiceWorker(page, timeoutMs = 20_000) {
@@ -295,8 +327,10 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
 
     await page.getByRole('button', { name: 'Configurações' }).click()
     await page.getByText('⭐ Favoritos', { exact: true }).click()
-    const favoritesModal = page.getByRole('heading', { name: '⭐ Favoritos', exact: true }).locator('xpath=../..')
-    await expect(favoritesModal.getByText(QA_MARKER, { exact: true })).toBeVisible({ timeout: 10_000 })
+    const favoritesHeading = page.getByRole('heading', { name: '⭐ Favoritos', exact: true })
+    await expect(favoritesHeading).toBeVisible({ timeout: 10_000 })
+    const favoritesModal = favoritesHeading.locator('xpath=../..')
+    await expect(favoritesModal.getByText(QA_MARKER, { exact: true })).toHaveCount(1, { timeout: 10_000 })
     await page.getByRole('button', { name: '✕' }).click()
 
     await openTransactions(page)
@@ -362,14 +396,16 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
     await deleteTransaction(page, marker)
   })
 
-  test('1.4 offline — alteração sobrevive ao fechamento/reabertura e sincroniza ao voltar online', async ({ page, context }) => {
+  test('1.4 offline — alteração sobrevive ao fechamento/reabertura e sincroniza ao voltar online', async ({ page, context, browser }) => {
     const sw = await waitForActiveServiceWorker(page)
     expect(sw?.scriptURL).toMatch(/\/sw\.js$/)
 
-    // Garante que o shell atual e seus chunks já foram carregados online antes do teste offline.
     await page.reload()
     await expect(page.getByRole('button', { name: /^Sair$/i })).toBeVisible({ timeout: 15_000 })
 
+    const marker = `${QA_MARKER}-OFFLINE`
+
+    // Establish the online shell/cache before simulating the device going offline.
     await context.setOffline(true)
     await page.close()
 
@@ -379,56 +415,84 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       await expect(reopened.getByRole('button', { name: /^Sair$/i })).toBeVisible({ timeout: 15_000 })
       await expect(reopened.getByText(/Modo offline/i)).toBeVisible({ timeout: 10_000 })
 
-      const marker = `${QA_MARKER}-OFFLINE`
       await createTransaction(reopened, 'Receita', marker)
       await expect(reopened.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
 
-      // Wait for the actual online synchronization to finish before reloading.
-      // Reloading immediately after setOffline(false) can abort the in-flight
-      // sync request and produce a false-negative in the E2E suite.
-      await context.setOffline(false)
-      await waitForSyncedLocalSnapshot(reopened, 20_000)
-      await reopened.reload()
-      await expect(reopened.getByText(marker, { exact: true })).toBeVisible({ timeout: 20_000 })
+      // Close while still offline. This is the critical persistence step.
+      await reopened.close()
 
-      await deleteTransaction(reopened, marker)
+      // Re-open offline to prove the local queue/state survives application close.
+      const reopenedOffline = await context.newPage()
+      try {
+        await reopenedOffline.goto('/')
+        await expect(reopenedOffline.getByRole('button', { name: /^Sair$/i })).toBeVisible({ timeout: 15_000 })
+        await expect(reopenedOffline.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+        // Going online must synchronize to Supabase. Verify with a completely
+        // fresh browser context, which has no local cache and therefore can
+        // only see the marker if it really reached the cloud.
+        await context.setOffline(false)
+        const cloudPage = await expectCloudMarker(browser, marker, 30_000)
+
+        try {
+          await deleteTransaction(cloudPage, marker)
+        } finally {
+          await cloudPage.context().close().catch(() => {})
+        }
+      } finally {
+        await reopenedOffline.close().catch(() => {})
+      }
     } finally {
       await context.setOffline(false)
-      await reopened.close()
     }
   })
 
-  test('1.5 conflito — alteração concorrente é detectada e pode ser resolvida', async ({ page, context }) => {
-    const second = await context.newPage()
+  test('1.5 conflito — alteração concorrente é detectada e pode ser resolvida', async ({ browser }) => {
+    const firstContext = await browser.newContext()
+    const secondContext = await browser.newContext()
+    const first = await firstContext.newPage()
+    const second = await secondContext.newPage()
+
+    const markerA = `${QA_MARKER}-A`
+    const markerB = `${QA_MARKER}-B`
+
     try {
-      await second.goto('/')
-      await expect(second.getByRole('button', { name: /^Sair$/i })).toBeVisible({ timeout: 15_000 })
+      await login(first)
+      await login(second)
 
-      await openTransactions(page)
+      await openTransactions(first)
       await openTransactions(second)
-      // Both tabs must have completed their initial cloud snapshot before
-      // the concurrent writes begin; otherwise tab B may legitimately have
-      // a null optimistic-concurrency base and no conflict can be detected.
-      await waitForSyncedLocalSnapshot(page)
-      await waitForSyncedLocalSnapshot(second)
 
-      await createTransaction(page, 'Receita', `${QA_MARKER}-A`)
-      await waitForSyncedLocalSnapshot(page)
-      await createTransaction(second, 'Receita', `${QA_MARKER}-B`)
+      // Both independent browser contexts must have loaded the same remote
+      // version before either one writes. Unlike two pages in one context,
+      // these contexts do not share localStorage or the storage module state.
+      await waitForRemoteSnapshot(first)
+      await waitForRemoteSnapshot(second)
 
-      await expect(second.getByText(
-        /Há uma versão mais recente na nuvem\. Seus dados locais foram preservados\./i,
-        { exact: false },
-      )).toBeVisible({ timeout: 20_000 })
+      await createTransaction(first, 'Receita', markerA)
+
+      // Prove the first write reached Supabase before the second device writes.
+      const cloudAfterFirst = await expectCloudMarker(browser, markerA, 30_000)
+      await cloudAfterFirst.context().close().catch(() => {})
+
+      // The second device still holds the old baseUpdatedAt from before A's write.
+      await createTransaction(second, 'Receita', markerB)
+
+      await expect(
+        second.getByText(
+          /Há uma versão mais recente na nuvem\. Seus dados locais foram preservados\./i,
+          { exact: false },
+        ),
+      ).toBeVisible({ timeout: 20_000 })
 
       await second.getByRole('button', { name: /Usar versão da nuvem/i }).click()
-      await expect(second.getByText(`${QA_MARKER}-A`, { exact: true })).toBeVisible({ timeout: 15_000 })
-      await expect(second.getByText(`${QA_MARKER}-B`, { exact: true })).toHaveCount(0)
+      await expect(second.getByText(markerA, { exact: true })).toBeVisible({ timeout: 15_000 })
+      await expect(second.getByText(markerB, { exact: true })).toHaveCount(0)
 
-      await openTransactions(page)
-      await deleteTransaction(page, `${QA_MARKER}-A`)
+      await deleteTransaction(first, markerA)
     } finally {
-      await second.close()
+      await firstContext.close().catch(() => {})
+      await secondContext.close().catch(() => {})
     }
   })
 
