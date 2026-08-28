@@ -13,6 +13,9 @@ export default defineConfig({
     baseURL: process.env.E2E_BASE_URL || 'https://contabilidade-pj.vercel.app',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
+    serviceWorkers: 'allow',
+    ...devices['Desktop Chrome'],
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
