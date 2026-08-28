@@ -21,7 +21,14 @@ async function login(page) {
   await authForm.locator('input[type="email"]').fill(email)
   await authForm.locator('input[type="password"]').fill(password)
   await authForm.locator('button[type="submit"]').click()
-  await expect(signedOutButton).toBeVisible({ timeout: 15_000 })
+
+  // Production auth can briefly render the signed-out shell while Supabase
+  // restores the session. Give the auth gate a short retry window instead of
+  // turning that transient race into a flaky PWA/auth failure.
+  await expect.poll(
+    async () => await signedOutButton.isVisible().catch(() => false),
+    { timeout: 20_000, intervals: [250, 500, 1_000] },
+  ).toBe(true)
 }
 
 async function logout(page) {
@@ -132,6 +139,25 @@ async function deleteTransaction(page, marker) {
   const card = await expandTransaction(page, marker)
   await card.getByRole('button', { name: /Excluir/i }).click()
   await expect(page.getByText(marker, { exact: true })).toHaveCount(0, { timeout: 10_000 })
+}
+
+async function waitForSyncedLocalSnapshot(page, timeoutMs = 15_000) {
+  await page.waitForFunction(() => {
+    const cache = Object.entries(localStorage).find(([key]) =>
+      key.startsWith('pj_app_state_cache_v3_'),
+    )
+    if (!cache) return false
+
+    try {
+      const envelope = JSON.parse(cache[1])
+      const queueExists = Object.keys(localStorage).some((key) =>
+        key.startsWith('pj_app_state_sync_queue_v2_'),
+      )
+      return Boolean(envelope?.remoteUpdatedAt) && envelope?.dirty === false && !queueExists
+    } catch {
+      return false
+    }
+  }, null, { timeout: timeoutMs })
 }
 
 async function waitForActiveServiceWorker(page, timeoutMs = 20_000) {
@@ -269,7 +295,8 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
 
     await page.getByRole('button', { name: 'Configurações' }).click()
     await page.getByText('⭐ Favoritos', { exact: true }).click()
-    await expect(page.getByText(QA_MARKER, { exact: true })).toBeVisible({ timeout: 10_000 })
+    const favoritesModal = page.getByRole('heading', { name: '⭐ Favoritos', exact: true }).locator('xpath=../..')
+    await expect(favoritesModal.getByText(QA_MARKER, { exact: true })).toBeVisible({ timeout: 10_000 })
     await page.getByRole('button', { name: '✕' }).click()
 
     await openTransactions(page)
@@ -356,7 +383,11 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       await createTransaction(reopened, 'Receita', marker)
       await expect(reopened.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
 
+      // Wait for the actual online synchronization to finish before reloading.
+      // Reloading immediately after setOffline(false) can abort the in-flight
+      // sync request and produce a false-negative in the E2E suite.
       await context.setOffline(false)
+      await waitForSyncedLocalSnapshot(reopened, 20_000)
       await reopened.reload()
       await expect(reopened.getByText(marker, { exact: true })).toBeVisible({ timeout: 20_000 })
 
@@ -375,13 +406,20 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
 
       await openTransactions(page)
       await openTransactions(second)
+      // Both tabs must have completed their initial cloud snapshot before
+      // the concurrent writes begin; otherwise tab B may legitimately have
+      // a null optimistic-concurrency base and no conflict can be detected.
+      await waitForSyncedLocalSnapshot(page)
+      await waitForSyncedLocalSnapshot(second)
 
       await createTransaction(page, 'Receita', `${QA_MARKER}-A`)
+      await waitForSyncedLocalSnapshot(page)
       await createTransaction(second, 'Receita', `${QA_MARKER}-B`)
 
-      await expect(second.getByRole('alert')).toContainText(/versão mais recente na nuvem/i, {
-        timeout: 20_000,
-      })
+      await expect(second.getByText(
+        /Há uma versão mais recente na nuvem\. Seus dados locais foram preservados\./i,
+        { exact: false },
+      )).toBeVisible({ timeout: 20_000 })
 
       await second.getByRole('button', { name: /Usar versão da nuvem/i }).click()
       await expect(second.getByText(`${QA_MARKER}-A`, { exact: true })).toBeVisible({ timeout: 15_000 })
