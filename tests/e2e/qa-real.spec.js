@@ -61,21 +61,29 @@ function transactionButton(page, type) {
   return page.getByRole('button', { name: /^\+ Distribuição de Lucro$/i }).first()
 }
 
+function fieldControl(page, label, controlSelector = 'input, select, textarea') {
+  // AppUI's Field component renders a visual <label> without a
+  // for/id association. getByLabel() therefore cannot resolve these
+  // controls in production. Scope the control to its own Field wrapper.
+  const field = page.locator('label').filter({ hasText: label }).first().locator('..')
+  return field.locator(controlSelector).first()
+}
+
 async function createTransaction(page, type, marker, value = '123,45', saveFavorite = false) {
   await openTransactions(page)
   await transactionButton(page, type).click()
 
   if (type === 'Receita') {
-    await page.getByLabel('Nome da Clínica *').fill(marker)
-    await page.getByLabel('Descrição da Receita').selectOption({ index: 1 }).catch(() => {})
+    await fieldControl(page, 'Nome da Clínica *', 'input').fill(marker)
+    await fieldControl(page, 'Descrição da Receita', 'select').selectOption({ index: 1 }).catch(() => {})
   } else if (type === 'Despesa') {
-    await page.getByLabel('Tipo de Despesa *').selectOption({ index: 1 })
+    await fieldControl(page, 'Tipo de Despesa *', 'select').selectOption({ index: 1 })
   } else {
-    await page.getByLabel('Descrição').fill(marker)
+    await fieldControl(page, 'Descrição', 'input, textarea').fill(marker)
   }
 
   await page.getByText('Valor *', { exact: true }).locator('..').locator('input').fill(value)
-  await page.getByLabel('Data *').fill(new Date().toISOString().slice(0, 10))
+  await fieldControl(page, 'Data *', 'input').fill(new Date().toISOString().slice(0, 10))
 
   if (saveFavorite && type !== 'Distribuição de Lucro') {
     await page.getByText('Salvar nos favoritos', { exact: true }).click()
@@ -160,7 +168,12 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       await expect(guest.locator('input[type="email"]')).toBeVisible({ timeout: 15_000 })
       await expect(guest.getByRole('button', { name: 'Criar conta', exact: true })).toBeVisible()
     } finally {
-      await guestContext.close()
+      // The page can be disposed by navigation in some Chromium/Supabase
+      // auth races. Closing only the still-open context prevents a cleanup
+      // race from turning an otherwise valid auth assertion into a failure.
+      if (!guestContext.pages().length || !guestContext.pages().every(p => p.isClosed())) {
+        await guestContext.close().catch(() => {})
+      }
     }
   })
 
@@ -178,20 +191,59 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
     }
   })
 
-  test('1.1 recuperação de senha — solicitação real de redefinição', async ({ page }) => {
-    await logout(page)
+  test('1.1 recuperação de senha — solicitação real de redefinição', async ({ browser }) => {
+    // Run recovery in a fresh, signed-out browser context. This avoids
+    // cross-test auth events (especially SIGNED_OUT) clearing the success
+    // message after the reset request completes.
+    const recoveryContext = await browser.newContext()
+    const recoveryPage = await recoveryContext.newPage()
 
-    const authForm = page.locator('form').filter({ has: page.locator('input[type="email"]') })
-    await authForm.getByRole('button', { name: /esqueci minha senha/i }).click()
+    try {
+      await recoveryPage.goto('/')
+      await expect(recoveryPage.locator('input[type="email"]')).toBeVisible({
+        timeout: 15_000,
+      })
 
-    const recoveryForm = page.locator('form').filter({ hasText: /Informe seu e-mail para receber as instruções/i })
-    await expect(recoveryForm.locator('input[type="email"]')).toBeVisible()
-    await recoveryForm.locator('input[type="email"]').fill(email)
-    await recoveryForm.getByRole('button', { name: /enviar instruções/i }).click()
+      const authForm = recoveryPage
+        .locator('form')
+        .filter({ has: recoveryPage.locator('input[type="email"]') })
 
-    await expect(page.getByText(/Se o e-mail estiver cadastrado, enviaremos as instruções/i)).toBeVisible({
-      timeout: 15_000,
-    })
+      await authForm.getByRole('button', { name: /esqueci minha senha/i }).click()
+
+      const recoveryForm = recoveryPage
+        .locator('form')
+        .filter({ hasText: /Informe seu e-mail para receber as instruções/i })
+
+      await expect(recoveryForm.locator('input[type="email"]')).toBeVisible({
+        timeout: 15_000,
+      })
+      await recoveryForm.locator('input[type="email"]').fill(email)
+
+      // The reset endpoint returning successfully is the primary E2E
+      // assertion. The UI confirmation is checked afterwards.
+      const responsePromise = recoveryPage.waitForResponse(
+        response =>
+          response.request().method() === 'POST' &&
+          /\/auth\/v1\/recover(?:\?|$)/.test(response.url()),
+        { timeout: 20_000 },
+      )
+
+      await recoveryForm
+        .getByRole('button', { name: /enviar instruções/i })
+        .click()
+
+      const response = await responsePromise
+      expect(response.status()).toBeGreaterThanOrEqual(200)
+      expect(response.status()).toBeLessThan(300)
+
+      await expect(
+        recoveryPage.getByText(
+          /Se o e-mail estiver cadastrado, enviaremos as instruções para redefinir sua senha\./i,
+        ),
+      ).toBeVisible({ timeout: 15_000 })
+    } finally {
+      await recoveryContext.close()
+    }
   })
 
   test('1.2 dados — receita, favorito, edição, despesa, distribuição e exclusão', async ({ page }) => {
@@ -205,7 +257,7 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
     await openTransactions(page)
     const card = await expandTransaction(page, QA_MARKER)
     await card.getByRole('button', { name: /Editar/i }).click()
-    await page.getByLabel('Nome da Clínica *').fill(QA_EDITED)
+    await fieldControl(page, 'Nome da Clínica *', 'input').fill(QA_EDITED)
     await page.getByRole('button', { name: 'Salvar Alterações', exact: true }).click()
     await expect(page.getByText(QA_EDITED, { exact: true })).toBeVisible({ timeout: 15_000 })
 
