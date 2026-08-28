@@ -1,4 +1,4 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.0'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.112.4'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -38,10 +38,16 @@ Deno.serve(async (req) => {
   }
 
   const userClient = createClient(supabaseUrl, serviceRoleKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
   })
 
-  const { data: { user }, error: userError } = await userClient.auth.getUser(token)
+  const {
+    data: { user },
+    error: userError,
+  } = await userClient.auth.getUser(token)
 
   if (userError || !user) {
     return new Response(JSON.stringify({ error: 'invalid_session' }), {
