@@ -38,7 +38,15 @@ async function openTransactions(page) {
   })
   const nav = page.locator('.app-bottom-nav')
   await expect(nav).toBeVisible({ timeout: 15_000 })
-  const button = nav.getByRole('button', { name: 'Lançamentos', exact: true })
+
+  // Each bottom-nav button contains both an icon and a text <span>.
+  // Playwright therefore computes the accessible name as "≡ Lançamentos"
+  // (and similarly for the other tabs), not exactly "Lançamentos".
+  // Target the visible label inside the button to avoid depending on the
+  // icon's contribution to the accessible name.
+  const button = nav
+    .getByText('Lançamentos', { exact: true })
+    .locator('..')
   await expect(button).toBeVisible({ timeout: 15_000 })
   await button.click()
   await expect(page.getByText(/\d+ registros$/i)).toBeVisible({ timeout: 15_000 })
@@ -219,7 +227,12 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
   })
 
   test('1.2 dados tributários — modal exibe os principais itens', async ({ page }) => {
-    await page.getByRole('button', { name: 'Mais', exact: true }).click()
+    const moreButton = page
+      .locator('.app-bottom-nav')
+      .getByText('Mais', { exact: true })
+      .locator('..')
+    await expect(moreButton).toBeVisible({ timeout: 15_000 })
+    await moreButton.click()
     await expect(page.getByText('Tributação', { exact: true })).toBeVisible({
       timeout: 15_000,
     })
