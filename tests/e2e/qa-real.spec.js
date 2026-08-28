@@ -53,12 +53,16 @@ async function openTransactions(page) {
 }
 
 function transactionButton(page, type) {
-  // Há dois "+ Receita" / "+ Despesa" quando a lista está vazia:
-  // o botão principal e o atalho do estado vazio. Ambos executam a mesma
-  // ação; usamos o primeiro de forma intencional para evitar strict mode.
-  if (type === 'Receita') return page.getByRole('button', { name: /^\+ Receita$/i }).first()
-  if (type === 'Despesa') return page.getByRole('button', { name: /^\+ Despesa$/i }).first()
-  return page.getByRole('button', { name: /^\+ Distribuição de Lucro$/i }).first()
+  // Use o botão principal da aba Lançamentos, que contém o emoji e o texto.
+  // O estado vazio também possui atalhos com o mesmo texto sem o emoji.
+  // Assim evitamos escolher acidentalmente um segundo botão e não dependemos
+  // do nome acessível calculado pelo Playwright.
+  const patterns = {
+    Receita: /💰\s*\+\s*Receita/i,
+    Despesa: /💸\s*\+\s*Despesa/i,
+    'Distribuição de Lucro': /💰\s*\+\s*Distribuição de Lucro/i,
+  }
+  return page.locator('button').filter({ hasText: patterns[type] }).first()
 }
 
 function fieldControl(page, label, controlSelector = 'input, select, textarea') {
@@ -86,7 +90,14 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
   await fieldControl(page, 'Data *', 'input').fill(new Date().toISOString().slice(0, 10))
 
   if (saveFavorite && type !== 'Distribuição de Lucro') {
-    await page.getByText('Salvar nos favoritos', { exact: true }).click()
+    // ChkBox é um componente visual dentro de um <label>; clicar apenas no
+    // texto não aciona seu onClick. Clique no próprio quadrado do checkbox.
+    const favoriteField = page
+      .locator('label')
+      .filter({ hasText: 'Salvar nos favoritos' })
+      .first()
+    await expect(favoriteField).toBeVisible({ timeout: 10_000 })
+    await favoriteField.locator('div').first().click()
   }
 
   const submitName =
@@ -103,10 +114,17 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
 async function expandTransaction(page, marker) {
   const text = page.getByText(marker, { exact: true })
   await expect(text).toBeVisible({ timeout: 15_000 })
-  const card = text.locator(
-    'xpath=ancestor::div[.//button[contains(normalize-space(.), "▾") or contains(normalize-space(.), "▲")]][1]',
-  )
-  await card.getByRole('button').first().click()
+
+  // TxCard tem uma estrutura fixa: p(nome) -> div(conteúdo) ->
+  // div(linha) -> div(card). Subir exatamente esses 3 níveis evita que um
+  // ancestor mais externo seja escolhido pelo XPath e perca os botões Editar/
+  // Excluir.
+  const card = text.locator('xpath=../../..')
+  await expect(card).toBeVisible({ timeout: 10_000 })
+  await card.locator('button').first().click()
+  await expect(card.getByRole('button', { name: /Editar/i })).toBeVisible({
+    timeout: 10_000,
+  })
   return card
 }
 
