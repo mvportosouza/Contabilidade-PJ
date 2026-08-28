@@ -19,7 +19,11 @@ test.describe('FASE 4 — QA E2E real', () => {
     await page.locator('input[type="email"]').fill(email)
     await page.locator('input[type="password"]').fill(password)
 
-    await page.getByRole('button', { name: /^Entrar$/i }).click()
+    // A aplicação possui mais de um botão "Entrar".
+    // Selecionamos explicitamente o submit do formulário.
+    await page.locator('button[type="submit"]').filter({
+      hasText: 'Entrar',
+    }).click()
 
     await expect(
       page.getByRole('button', { name: /^Sair$/i })
