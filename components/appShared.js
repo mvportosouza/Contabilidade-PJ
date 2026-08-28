@@ -1,5 +1,5 @@
 import { sSet } from "../lib/storage";
-import { calcRecommendedPL } from "../lib/taxes";
+import { calcRecommendedPL, SALARIO_MINIMO_2026 } from "../lib/taxes";
 
 /* ─── Logo ─────────────────────────────────────── */
 const LOGO = "/assets/logo-horizontal.jpeg";
@@ -118,8 +118,6 @@ const sortFavorites = list => [...(Array.isArray(list) ? list : [])].sort((a,b)=
 });
 
 /* ══════════════════════════════════════════════════ */
-export default 
-
 function getPreviousMonthPayables({txs, effectivePlMap, ctbMap, irrfMap, year, month, calcTributacao, calcIRRF}) {
   const previous = new Date(Number(year), Number(month) - 1, 1);
   const py = previous.getFullYear();
