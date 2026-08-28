@@ -99,20 +99,21 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
   if (saveFavorite && type !== 'Distribuição de Lucro') {
     // ChkBox é um componente visual dentro de um <label>; clicar apenas no
     // texto não aciona seu onClick. Clique no próprio quadrado do checkbox.
-    const favoriteField = page
-      .locator('label')
-      .filter({ hasText: /^Salvar nos favoritos$/ })
-      .first()
+    // O ChkBox é um <div> visual dentro do <label>; o texto fica em um
+    // <span> irmão. Evite depender de :scope > div após o React re-renderizar
+    // o componente, pois o nó visual pode ser substituído durante o clique.
+    const favoriteField = page.locator('label').filter({
+      has: page.getByText('Salvar nos favoritos', { exact: true }),
+    }).first()
     await expect(favoriteField).toBeVisible({ timeout: 10_000 })
 
-    // ChkBox é um controle visual React (não é input nativo). Use o
-    // clique real do Playwright para disparar o handler React onClick.
-    // dispatchEvent() sintético pode não reproduzir corretamente a sequência
-    // de eventos usada pelo React/browser neste componente.
-    const favoriteBox = favoriteField.locator(':scope > div').first()
+    const favoriteBox = favoriteField.locator('div').first()
     await expect(favoriteBox).toBeVisible({ timeout: 10_000 })
     await favoriteBox.click()
-    await expect(favoriteBox).toHaveCSS('background-color', 'rgb(26, 48, 85)', {
+
+    // A confirmação funcional é a marca de seleção renderizada pelo próprio
+    // ChkBox. Isso é mais robusto que testar uma propriedade CSS específica.
+    await expect(favoriteField.getByText('✓', { exact: true })).toBeVisible({
       timeout: 5_000,
     })
   }
