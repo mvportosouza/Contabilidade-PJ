@@ -19,8 +19,10 @@ export default function MyApp({ Component, pageProps }) {
           })
         }).catch((error) => console.error('Falha ao registrar Service Worker:', error))
       }
-      window.addEventListener('load', register)
-      return () => window.removeEventListener('load', register)
+
+      // Do not depend on the window "load" event. In production/fast
+      // navigations React can mount after that event has already fired.
+      register()
     }
   }, [])
 
