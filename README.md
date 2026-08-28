@@ -4,10 +4,10 @@ Aplicativo de gestão financeira para dentista PJ (Simples Nacional).
 
 ## Tecnologias
 
-- Next.js 16.x (lockfile/build atual: 16.3.1)
+- Next.js 16.3.3
 - React 19.2.8
 - React DOM 19.2.8
-- Recharts 2.12.7
+- Recharts 3.10.1
 - Supabase Auth
 - Supabase PostgreSQL
 - Row Level Security (RLS)
@@ -124,6 +124,7 @@ Depois do deploy, confirme o domínio de produção e as URLs de autenticação 
 - **Lote P — Documentation Cleanup:** `docs/LOTE_P_DOCUMENTATION.md`
 - **Lote Q — Final Hardening & Release QA:** `docs/LOTE_Q_FINAL_HARDENING.md`
 - **Supabase Migration Ledger:** `docs/SUPABASE_MIGRATION_LEDGER.md`
+- **Fase 5 — Refatoração, performance, CSP e documentação:** `docs/FASE_5_REFACTOR_PERFORMANCE_CSP.md`
 
 ## Observações
 
