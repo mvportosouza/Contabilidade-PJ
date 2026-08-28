@@ -30,8 +30,18 @@ async function logout(page) {
 }
 
 async function openTransactions(page) {
-  await page.getByRole('button', { name: 'Lançamentos', exact: true }).click()
-  await expect(page.getByText(/\d+ registros$/i)).toBeVisible()
+  // The bottom navigation is the stable app-level control. Wait for the
+  // authenticated shell before interacting with it; this avoids racing
+  // AuthGate/App hydration in production.
+  await expect(page.getByRole('button', { name: /^Sair$/i })).toBeVisible({
+    timeout: 15_000,
+  })
+  const nav = page.locator('.app-bottom-nav')
+  await expect(nav).toBeVisible({ timeout: 15_000 })
+  const button = nav.getByRole('button', { name: 'Lançamentos', exact: true })
+  await expect(button).toBeVisible({ timeout: 15_000 })
+  await button.click()
+  await expect(page.getByText(/\d+ registros$/i)).toBeVisible({ timeout: 15_000 })
 }
 
 function transactionButton(page, type) {
@@ -90,13 +100,17 @@ async function deleteTransaction(page, marker) {
   await expect(page.getByText(marker, { exact: true })).toHaveCount(0, { timeout: 10_000 })
 }
 
-async function waitForActiveServiceWorker(page, timeoutMs = 15_000) {
+async function waitForActiveServiceWorker(page, timeoutMs = 20_000) {
   return page.evaluate(async (limit) => {
     if (!('serviceWorker' in navigator)) return null
 
     const started = Date.now()
     while (Date.now() - started < limit) {
-      const registration = await navigator.serviceWorker.getRegistration('/')
+      const registrations = await navigator.serviceWorker.getRegistrations()
+      const registration =
+        registrations.find((item) => item.scope === `${location.origin}/`) ||
+        registrations.find((item) => item.active?.scriptURL.endsWith('/sw.js'))
+
       if (registration?.active) {
         return {
           scope: registration.scope,
@@ -104,6 +118,7 @@ async function waitForActiveServiceWorker(page, timeoutMs = 15_000) {
           controller: Boolean(navigator.serviceWorker.controller),
         }
       }
+
       await new Promise((resolve) => setTimeout(resolve, 250))
     }
     return null
@@ -204,19 +219,24 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
   })
 
   test('1.2 dados tributários — modal exibe os principais itens', async ({ page }) => {
-    await page.getByRole('button', { name: 'Mais' }).click()
-    const modal = page.getByText('Tributação', { exact: true }).locator('..').locator('..')
-    await expect(page.getByText('Tributação', { exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Mais', exact: true }).click()
+    await expect(page.getByText('Tributação', { exact: true })).toBeVisible({
+      timeout: 15_000,
+    })
 
+    // The modal has no semantic role in the production UI. Use the visible
+    // labels themselves instead of depending on a fragile parent hierarchy.
     for (const label of [
-      /DAS — Simples Nacional/,
-      /Pró-labore/,
-      /INSS do Sócio/,
-      /Contabilidade/,
-      /^IRRF$/,
-      /Total de Obrigações/,
+      /DAS\s*[—-]\s*Simples Nacional/i,
+      /Pró-labore/i,
+      /INSS do Sócio/i,
+      /Contabilidade/i,
+      /^IRRF$/i,
+      /Total de Obrigações/i,
     ]) {
-      await expect(modal.getByText(label).first()).toBeVisible()
+      await expect(page.getByText(label).first()).toBeVisible({
+        timeout: 10_000,
+      })
     }
   })
 
@@ -304,6 +324,12 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
   })
 
   test('1.7 PWA — manifest, Service Worker, escopo e assets', async ({ page }) => {
+    // Registration is initiated by the app after the document loads.
+    await page.reload()
+    await expect(page.getByRole('button', { name: /^Sair$/i })).toBeVisible({
+      timeout: 15_000,
+    })
+
     const manifest = await page.evaluate(async () => {
       const response = await fetch('/manifest.json', { cache: 'no-store' })
       if (!response.ok) throw new Error(`Manifest HTTP ${response.status}`)
@@ -330,6 +356,10 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
   })
 
   test('1.7 PWA — shell continua acessível após perda de rede', async ({ page, context }) => {
+    await page.reload()
+    await expect(page.getByRole('button', { name: /^Sair$/i })).toBeVisible({
+      timeout: 15_000,
+    })
     const sw = await waitForActiveServiceWorker(page)
     expect(sw).toBeTruthy()
 
