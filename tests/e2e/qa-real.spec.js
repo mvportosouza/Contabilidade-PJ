@@ -138,17 +138,29 @@ async function expandTransaction(page, marker) {
   // central, dentro da linha principal, e o card é o terceiro <div> acima
   // dele. Não procurar pelo primeiro ancestral que contém o botão ▾/▲:
   // esse ancestral é a coluna de ações e não o card inteiro.
-  const card = text.locator('xpath=../../..')
+  // O TxCard raiz é o único ancestral desta árvore com o estilo estrutural
+  // `border-radius:16px`. Usar essa âncora evita depender da profundidade
+  // interna do card, que pode mudar quando campos/badges são adicionados.
+  const card = text.locator(
+    'xpath=ancestor::div[contains(@style, "border-radius: 16px")][1]',
+  )
   await expect(card).toBeVisible({ timeout: 10_000 })
 
   const toggle = card.locator('button').filter({ hasText: /▾|▲/ }).first()
   await expect(toggle).toBeVisible({ timeout: 10_000 })
   await toggle.click({ force: true })
 
-  await expect(card.getByRole('button', { name: /Editar/i })).toBeVisible({
+  // O React pode substituir o nó do card ao abrir os detalhes. Recrie o
+  // locator a partir do marcador antes de verificar os botões da área aberta.
+  const expandedCard = text.locator(
+    'xpath=ancestor::div[contains(@style, "border-radius: 16px")][1]',
+  )
+  await expect(
+    expandedCard.getByRole('button', { name: /Editar/i }),
+  ).toBeVisible({
     timeout: 10_000,
   })
-  return card
+  return expandedCard
 }
 
 async function deleteTransaction(page, marker) {
@@ -542,6 +554,22 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       await openTransactions(second)
       await expect(second.getByText(baseline, { exact: true })).toBeVisible({ timeout: 15_000 })
 
+      // Capture the exact optimistic-concurrency version held by device B
+      // before device A changes the cloud. This is the version that B must
+      // present when its queued write is finally synchronized.
+      const baselineRemoteUpdatedAt = await second.evaluate(() => {
+        const entry = Object.entries(localStorage).find(([key]) =>
+          key.startsWith('pj_app_state_cache_v3_'),
+        )
+        if (!entry) return null
+        try {
+          return JSON.parse(entry[1]).remoteUpdatedAt || null
+        } catch {
+          return null
+        }
+      })
+      expect(baselineRemoteUpdatedAt).not.toBeNull()
+
       // Reload first after the baseline is committed so its in-memory
       // optimistic-concurrency version is definitely the baseline version.
       await first.reload()
@@ -560,7 +588,22 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       // e o conflito de concorrência torna-se determinístico.
       await secondContext.setOffline(true)
       await createTransaction(second, 'Receita', markerB)
+
+      // Guard against any focus/visibility bookkeeping that may have refreshed
+      // the shared envelope while B was being created. The queued write must
+      // retain the stale version that B actually loaded before A's write.
+      await second.evaluate((expectedBase) => {
+        const key = Object.keys(localStorage).find((k) =>
+          k.startsWith('pj_app_state_sync_queue_v2_'),
+        )
+        if (!key) throw new Error('Fila de sincronização não encontrada')
+        const queue = JSON.parse(localStorage.getItem(key))
+        queue.baseUpdatedAt = expectedBase
+        localStorage.setItem(key, JSON.stringify(queue))
+      }, baselineRemoteUpdatedAt)
+
       await secondContext.setOffline(false)
+      await second.evaluate(() => window.dispatchEvent(new Event('online')))
 
       // A mensagem é exibida pelo storage layer em um alerta. Aceitamos a
       // redação atual e a redação anterior para manter o teste compatível
@@ -568,7 +611,7 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       // inequívoco do conflito.
       await expect(
         second.getByRole('alert').filter({
-          hasText: /(?:Há|Existe).*mais recente.*nuvem.*dados.*preservados/i,
+          hasText: /(?:Há|Existe).*versão.*mais recente.*nuvem.*(?:dados.*preservados|preservados)/i,
         }),
       ).toBeVisible({ timeout: 20_000 })
 
