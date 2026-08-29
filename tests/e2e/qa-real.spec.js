@@ -134,24 +134,25 @@ async function expandTransaction(page, marker) {
   const text = page.getByText(marker, { exact: true })
   await expect(text).toBeVisible({ timeout: 15_000 })
 
-  // Não dependa de profundidade fixa (../../..) nem de estilos inline.
-  // Antes de abrir, o ancestral mais próximo que contém o marcador e o
-  // botão ▾ é a linha de conteúdo; o toggle dessa linha abre o TxCard.
+  // No TxCard, o botão ▾/▲ fica na linha superior e a área de ações
+  // (Editar/Excluir) fica no div raiz imediatamente acima dessa linha.
+  // Subir exatamente um nível a partir da linha do toggle é mais estável
+  // que depender de ../../.., estilos inline ou de um botão global.
   const toggleRow = text.locator(
     'xpath=ancestor::div[.//button[contains(normalize-space(.), "▾") or contains(normalize-space(.), "▲")]][1]',
   )
+  const card = toggleRow.locator('..')
   const toggle = toggleRow.getByRole('button').first()
+
   await expect(toggle).toBeVisible({ timeout: 10_000 })
   await toggle.click({ force: true })
 
-  // Depois da abertura, procure novamente a partir do marcador. O TxCard
-  // raiz é agora o ancestral mais próximo que contém o botão "Editar".
-  // Isso também sobrevive ao re-render do React provocado pelo setOpen().
-  // O TxCard não possui uma classe/role própria e o React pode substituir
-  // seus nós durante o setOpen(). Portanto, depois de abrir, use o botão
-  // de ação realmente renderizado na página. Apenas o card aberto possui
-  // "Editar" e "Excluir", então esses locators permanecem inequívocos.
-  const editButton = page.getByRole('button', { name: /Editar/i }).last()
+  // Re-resolve o card depois do setOpen(): o React pode substituir os nós
+  // durante o re-render. O locator continua ancorado no marcador exclusivo.
+  const expandedCard = text.locator(
+    'xpath=ancestor::div[.//button[contains(normalize-space(.), "▲")]][1]/..',
+  )
+  const editButton = expandedCard.getByRole('button', { name: /Editar/i })
   await expect(editButton).toBeVisible({ timeout: 10_000 })
   return editButton
 }
@@ -214,30 +215,49 @@ async function waitForCloudSync(page, timeoutMs = 20_000) {
 }
 
 async function expectCloudMarker(page, marker, timeoutMs = 30_000) {
-  // Verify the marker from the cloud without creating another browser
-  // context. Vercel can challenge repeated fresh Chromium contexts from CI
-  // with a Security Checkpoint, which is unrelated to the application's
-  // Supabase synchronization. We clear only the app-data cache/queue while
-  // preserving the Supabase auth session, then reload the same page.
-  const appCacheKeys = await page.evaluate(() =>
-    Object.keys(localStorage).filter(
-      key =>
-        key.startsWith('pj_app_state_cache_v3_') ||
-        key.startsWith('pj_app_state_cache_v2_') ||
-        key.startsWith('pj_app_state_sync_queue_v2_') ||
-        key.startsWith('pj_app_state_sync_queue_v1_') ||
-        key === 'pj_app_state_cache_v1',
-    ),
-  )
-  await page.evaluate(keys => keys.forEach(key => localStorage.removeItem(key)), appCacheKeys)
+  // Verifica o marcador a partir do estado remoto, removendo somente o cache
+  // local do aplicativo. Em CI, o evento online/Supabase pode concluir a
+  // persistência alguns segundos depois do primeiro reload; por isso fazemos
+  // tentativas reais de reidratação antes de declarar falha.
+  const started = Date.now()
+  let lastError
 
-  await page.reload()
-  await expect(page.getByRole('button', { name: /^Sair$/i })).toBeVisible({ timeout: 15_000 })
-  await openTransactions(page)
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const appCacheKeys = await page.evaluate(() =>
+        Object.keys(localStorage).filter(
+          key =>
+            key.startsWith('pj_app_state_cache_v3_') ||
+            key.startsWith('pj_app_state_cache_v2_') ||
+            key.startsWith('pj_app_state_sync_queue_v2_') ||
+            key.startsWith('pj_app_state_sync_queue_v1_') ||
+            key === 'pj_app_state_cache_v1',
+        ),
+      )
 
-  const markerLocator = page.getByText(marker, { exact: true })
-  await expect(markerLocator).toBeVisible({ timeout: timeoutMs })
-  return markerLocator
+      await page.evaluate(keys => {
+        keys.forEach(key => localStorage.removeItem(key))
+      }, appCacheKeys)
+
+      await page.reload()
+      await expect(page.getByRole('button', { name: /^Sair$/i })).toBeVisible({
+        timeout: 15_000,
+      })
+      await openTransactions(page)
+
+      const markerLocator = page.getByText(marker, { exact: true })
+      await expect(markerLocator).toBeVisible({
+        timeout: Math.min(8_000, Math.max(1_000, timeoutMs)),
+      })
+      return markerLocator
+    } catch (error) {
+      lastError = error
+      if (Date.now() - started >= timeoutMs) break
+      await page.waitForTimeout(1_000)
+    }
+  }
+
+  throw lastError || new Error(`Marcador remoto não encontrado: ${marker}`)
 }
 
 async function waitForActiveServiceWorker(page, timeoutMs = 20_000) {
