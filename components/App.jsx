@@ -62,6 +62,7 @@ function App() {
   const [toast,setToast]=useState(null);
 
   const [form,setForm]=useState(()=>createBlankForm(now));
+  const hydratedRef = useRef(false);
 
   useEffect(()=>{
     (async()=>{
@@ -95,6 +96,7 @@ function App() {
       setFavs(fv); setCtbMap(ct); setIrrfMap(irrf); setPlManual(seededPL);
       const updated=await cascadePL(t,seededPL);
       setTxs(t); setPlMap(updated);
+       hydratedRef.current = true;
     })();
   },[]);
 
@@ -242,6 +244,17 @@ function App() {
     else setForm(f=>({...f,categoria:cat,descricao:""}));
   };
   const handleSubmit=async()=>{
+    // Wait for the initial asynchronous storage hydration. Without this
+    // guard, a very fast first submission can race with the hydration effect
+    // and have its newly saved favorite overwritten in React state.
+    const hydrationDeadline = Date.now() + 15_000;
+    while (!hydratedRef.current && Date.now() < hydrationDeadline) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (!hydratedRef.current) {
+      notify("Aguarde o carregamento dos dados terminar.","err");
+      return;
+    }
     if(!form.valor||!form.data){notify("Informe valor e data.","err");return;}
     if(formTipo==="receita"&&!form.nome){notify("Informe o nome da clínica.","err");return;}
     if(formTipo==="despesa"&&!form.categoria){notify("Selecione o tipo de despesa.","err");return;}
