@@ -107,13 +107,10 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
     }).first()
     await expect(favoriteField).toBeVisible({ timeout: 10_000 })
 
-    const favoriteBox = favoriteField.locator('div').first()
+    const favoriteBox = favoriteField.getByRole('checkbox')
     await expect(favoriteBox).toBeVisible({ timeout: 10_000 })
     await favoriteBox.click()
-
-    // A confirmação funcional é a marca de seleção renderizada pelo próprio
-    // ChkBox. Isso é mais robusto que testar uma propriedade CSS específica.
-    await expect(favoriteField.getByText('✓', { exact: true })).toBeVisible({
+    await expect(favoriteBox).toHaveAttribute('aria-checked', 'true', {
       timeout: 5_000,
     })
   }
@@ -147,6 +144,20 @@ async function expandTransaction(page, marker) {
 }
 
 async function deleteTransaction(page, marker) {
+  // A sincronização concorrente pode manter o banner de conflito sobre a
+  // interface. Antes de clicar no card, resolva-o pela versão da nuvem; a
+  // limpeza do teste não deve falhar por um overlay de status.
+  const conflict = page.getByRole('alert').filter({
+    hasText: /Há uma versão mais recente na nuvem/i,
+  })
+  if (await conflict.isVisible().catch(() => false)) {
+    await conflict.getByRole('button', { name: /Usar versão da nuvem/i }).click()
+    await expect(page.getByRole('button', { name: /^Sair$/i })).toBeVisible({
+      timeout: 15_000,
+    })
+    await openTransactions(page)
+  }
+
   const card = await expandTransaction(page, marker)
   await card.getByRole('button', { name: /Excluir/i }).click()
   await expect(page.getByText(marker, { exact: true })).toHaveCount(0, { timeout: 10_000 })
