@@ -134,27 +134,23 @@ async function expandTransaction(page, marker) {
   const text = page.getByText(marker, { exact: true })
   await expect(text).toBeVisible({ timeout: 15_000 })
 
-  // TxCard possui uma estrutura estável: o marcador fica dentro da coluna
-  // central, dentro da linha principal, e o card é o terceiro <div> acima
-  // dele. Não procurar pelo primeiro ancestral que contém o botão ▾/▲:
-  // esse ancestral é a coluna de ações e não o card inteiro.
-  // O TxCard raiz é o único ancestral desta árvore com o estilo estrutural
-  // `border-radius:16px`. Usar essa âncora evita depender da profundidade
-  // interna do card, que pode mudar quando campos/badges são adicionados.
-  const card = text.locator(
-    'xpath=ancestor::div[contains(@style, "border-radius: 16px")][1]',
+  // Não dependa de profundidade fixa (../../..) nem de estilos inline.
+  // Antes de abrir, o ancestral mais próximo que contém o marcador e o
+  // botão ▾ é a linha de conteúdo; o toggle dessa linha abre o TxCard.
+  const toggleRow = text.locator(
+    'xpath=ancestor::div[.//button[contains(normalize-space(.), "▾") or contains(normalize-space(.), "▲")]][1]',
   )
-  await expect(card).toBeVisible({ timeout: 10_000 })
-
-  const toggle = card.locator('button').filter({ hasText: /▾|▲/ }).first()
+  const toggle = toggleRow.getByRole('button').first()
   await expect(toggle).toBeVisible({ timeout: 10_000 })
   await toggle.click({ force: true })
 
-  // O React pode substituir o nó do card ao abrir os detalhes. Recrie o
-  // locator a partir do marcador antes de verificar os botões da área aberta.
+  // Depois da abertura, procure novamente a partir do marcador. O TxCard
+  // raiz é agora o ancestral mais próximo que contém o botão "Editar".
+  // Isso também sobrevive ao re-render do React provocado pelo setOpen().
   const expandedCard = text.locator(
-    'xpath=ancestor::div[contains(@style, "border-radius: 16px")][1]',
+    'xpath=ancestor::div[.//button[contains(normalize-space(.), "Editar")]][1]',
   )
+  await expect(expandedCard).toBeVisible({ timeout: 10_000 })
   await expect(
     expandedCard.getByRole('button', { name: /Editar/i }),
   ).toBeVisible({
