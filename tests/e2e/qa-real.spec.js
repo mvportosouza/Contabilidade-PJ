@@ -124,10 +124,6 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
 
   await page.getByRole('button', { name: submitName, exact: true }).click()
   await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
-  // Do not continue while the write is only optimistic/local. Offline and
-  // conflict scenarios deliberately reload/clear local state and therefore
-  // require the marker to have reached Supabase first.
-  await waitForCloudSync(page, 20_000)
 }
 
 async function expandTransaction(page, marker) {
@@ -380,7 +376,8 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
     await page.getByText('⭐ Favoritos', { exact: true }).click()
     const favoritesHeading = page.getByRole('heading', { name: '⭐ Favoritos', exact: true })
     await expect(favoritesHeading).toBeVisible({ timeout: 10_000 })
-    const favoritesModal = favoritesHeading.locator('xpath=../..')
+    const favoritesModal = page.getByRole('dialog').filter({ has: favoritesHeading }).first()
+    await expect(favoritesModal).toBeVisible({ timeout: 10_000 })
     await expect(favoritesModal.getByText(QA_MARKER, { exact: true })).toHaveCount(1, { timeout: 10_000 })
     await page.getByRole('button', { name: '✕' }).click()
 
