@@ -124,6 +124,10 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
 
   await page.getByRole('button', { name: submitName, exact: true }).click()
   await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+  // Do not continue while the write is only optimistic/local. Offline and
+  // conflict scenarios deliberately reload/clear local state and therefore
+  // require the marker to have reached Supabase first.
+  await waitForCloudSync(page, 20_000)
 }
 
 async function expandTransaction(page, marker) {
@@ -173,6 +177,24 @@ async function waitForRemoteSnapshot(page, timeoutMs = 15_000) {
     try {
       const envelope = JSON.parse(cache[1])
       return Boolean(envelope?.remoteUpdatedAt)
+    } catch {
+      return false
+    }
+  }, null, { timeout: timeoutMs })
+}
+
+async function waitForCloudSync(page, timeoutMs = 20_000) {
+  const isOffline = await page.evaluate(() => navigator.onLine === false)
+  if (isOffline) return
+
+  await page.waitForFunction(() => {
+    const entry = Object.entries(localStorage).find(([key]) =>
+      key.startsWith('pj_app_state_cache_v3_'),
+    )
+    if (!entry) return false
+    try {
+      const envelope = JSON.parse(entry[1])
+      return Boolean(envelope.remoteUpdatedAt) && envelope.dirty === false
     } catch {
       return false
     }
