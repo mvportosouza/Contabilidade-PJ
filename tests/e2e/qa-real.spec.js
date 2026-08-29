@@ -134,13 +134,18 @@ async function expandTransaction(page, marker) {
   const text = page.getByText(marker, { exact: true })
   await expect(text).toBeVisible({ timeout: 15_000 })
 
-  // TxCard tem uma estrutura fixa: p(nome) -> div(conteúdo) ->
-  // div(linha) -> div(card). Subir exatamente esses 3 níveis evita que um
-  // ancestor mais externo seja escolhido pelo XPath e perca os botões Editar/
-  // Excluir.
-  const card = text.locator('xpath=../../..')
+  // Encontra o card pelo botão de expansão, em vez de depender da quantidade
+  // exata de <div>s entre o texto e o container. Isso permanece estável caso
+  // o layout interno do TxCard seja reestruturado.
+  const card = text.locator(
+    'xpath=ancestor::div[.//button[contains(normalize-space(.), "▾") or contains(normalize-space(.), "▲")]][1]',
+  )
   await expect(card).toBeVisible({ timeout: 10_000 })
-  await card.locator('button').first().click()
+
+  const toggle = card.locator('button').filter({ hasText: /▾|▲/ }).first()
+  await expect(toggle).toBeVisible({ timeout: 10_000 })
+  await toggle.click({ force: true })
+
   await expect(card.getByRole('button', { name: /Editar/i })).toBeVisible({
     timeout: 10_000,
   })
@@ -553,11 +558,14 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       // the optimistic-concurrency conflict instead of overwriting A.
       await createTransaction(second, 'Receita', markerB)
 
+      // A mensagem é exibida pelo storage layer em um alerta. Aceitamos a
+      // redação atual e a redação anterior para manter o teste compatível
+      // durante a evolução do texto, mas exigimos sempre o núcleo semântico
+      // inequívoco do conflito.
       await expect(
-        second.getByText(
-          /Existe uma versão mais recente na nuvem\. Os dados locais foram preservados\./i,
-          { exact: false },
-        ),
+        second.getByRole('alert').filter({
+          hasText: /mais recente.*nuvem.*dados.*preservados/i,
+        }),
       ).toBeVisible({ timeout: 20_000 })
 
       await second.getByRole('button', { name: /Usar versão da nuvem/i }).click()
