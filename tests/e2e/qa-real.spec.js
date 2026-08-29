@@ -89,6 +89,10 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
     await fieldControl(page, 'Descrição da Receita', 'select').selectOption({ index: 1 }).catch(() => {})
   } else if (type === 'Despesa') {
     await fieldControl(page, 'Tipo de Despesa *', 'select').selectOption({ index: 1 })
+    // Despesas use the selected category as their displayed name. Keep the
+    // unique QA marker in the observation so the E2E test can reliably
+    // identify the exact transaction without changing production semantics.
+    await fieldControl(page, 'Observação', 'input, textarea').fill(marker)
   } else {
     await fieldControl(page, 'Descrição', 'input, textarea').fill(marker)
   }
@@ -551,7 +555,7 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
 
       await expect(
         second.getByText(
-          /Há uma versão mais recente na nuvem\. Seus dados locais foram preservados\./i,
+          /Existe uma versão mais recente na nuvem\. Os dados locais foram preservados\./i,
           { exact: false },
         ),
       ).toBeVisible({ timeout: 20_000 })
