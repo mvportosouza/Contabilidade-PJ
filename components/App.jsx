@@ -251,8 +251,17 @@ function App() {
     if(form.saveAsFav && formTipo!=="distribuicao"){
       const key=formTipo==="receita"?form.nome:form.categoria;
       const fd={id:cryptoId(),tipo:formTipo,nome:key,cnpj:form.cnpj,telefone:form.telefone,cep:form.cep,endereco:form.endereco,email:form.email,especialidade:form.especialidade,categoria:form.categoria};
-      const ex=favs.find(f=>f.tipo===formTipo&&f.nome===key);
-      await saveFavs(ex?favs.map(f=>f.tipo===formTipo&&f.nome===key?{...fd,id:f.id}:f):[...favs,fd]);
+
+      // Re-read the persisted favorites before composing the next state.
+      // This prevents a just-loaded React state snapshot from overwriting a
+      // favorite when the form is submitted immediately after app hydration.
+      const currentFavs = await sGet("pj_favs2") || [];
+      const ex=currentFavs.find(f=>f.tipo===formTipo&&f.nome===key);
+      const nextFavs=ex
+        ? currentFavs.map(f=>f.tipo===formTipo&&f.nome===key?{...fd,id:f.id}:f)
+        : [...currentFavs,fd];
+
+      await saveFavs(nextFavs);
     }
     setShowForm(false); notify(editId?"Atualizado!":"Salvo!");
   };
