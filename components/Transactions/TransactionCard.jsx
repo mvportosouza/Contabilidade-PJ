@@ -9,7 +9,7 @@ export function TxCard({tx,onEdit,onDelete,C,fmtBRL,MONTHS}){
   const txColor=isR?C.navyMid:isD?C.gold:C.red;
   const txBg=isR?C.navyLight:isD?"#F8F1E5":C.redLight;
   return(
-    <div style={{background:"white",borderRadius:16,padding:"13px 15px",marginBottom:10,boxShadow:"0 1px 8px rgba(0,0,0,0.05)",borderLeft:`3px solid ${txColor}`}}>
+    <div data-testid="transaction-card" style={{background:"white",borderRadius:16,padding:"13px 15px",marginBottom:10,boxShadow:"0 1px 8px rgba(0,0,0,0.05)",borderLeft:`3px solid ${txColor}`}}>
       <div style={{display:"flex",alignItems:"center",gap:11}}>
         <div style={{background:txBg,borderRadius:11,padding:"7px 9px",textAlign:"center",minWidth:44}}>
           <p style={{margin:0,fontSize:15,fontWeight:"bold",color:txColor,lineHeight:1}}>{d.getDate().toString().padStart(2,"0")}</p>
