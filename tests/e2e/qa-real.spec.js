@@ -134,12 +134,11 @@ async function expandTransaction(page, marker) {
   const text = page.getByText(marker, { exact: true })
   await expect(text).toBeVisible({ timeout: 15_000 })
 
-  // Encontra o card pelo botão de expansão, em vez de depender da quantidade
-  // exata de <div>s entre o texto e o container. Isso permanece estável caso
-  // o layout interno do TxCard seja reestruturado.
-  const card = text.locator(
-    'xpath=ancestor::div[.//button[contains(normalize-space(.), "▾") or contains(normalize-space(.), "▲")]][1]',
-  )
+  // TxCard possui uma estrutura estável: o marcador fica dentro da coluna
+  // central, dentro da linha principal, e o card é o terceiro <div> acima
+  // dele. Não procurar pelo primeiro ancestral que contém o botão ▾/▲:
+  // esse ancestral é a coluna de ações e não o card inteiro.
+  const card = text.locator('xpath=../../..')
   await expect(card).toBeVisible({ timeout: 10_000 })
 
   const toggle = card.locator('button').filter({ hasText: /▾|▲/ }).first()
@@ -157,7 +156,7 @@ async function deleteTransaction(page, marker) {
   // interface. Antes de clicar no card, resolva-o pela versão da nuvem; a
   // limpeza do teste não deve falhar por um overlay de status.
   const conflict = page.getByRole('alert').filter({
-    hasText: /Há uma versão mais recente na nuvem/i,
+    hasText: /(?:Há|Existe) (?:uma versão|uma alteração) mais recente na nuvem/i,
   })
   if (await conflict.isVisible().catch(() => false)) {
     await conflict.getByRole('button', { name: /Usar versão da nuvem/i }).click()
@@ -554,9 +553,14 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       // Prove A reached Supabase before B attempts its stale write.
       await expectCloudMarker(first, markerA, 30_000)
 
-      // B still has the baseline remoteUpdatedAt and therefore must receive
-      // the optimistic-concurrency conflict instead of overwriting A.
+      // Coloque B offline antes de gravar. Assim o lançamento fica na fila
+      // com o remoteUpdatedAt do baseline e não pode ser atualizado
+      // silenciosamente por eventos de foco/visibilidade enquanto A grava.
+      // Ao voltar online, a RPC recebe deliberadamente uma versão obsoleta
+      // e o conflito de concorrência torna-se determinístico.
+      await secondContext.setOffline(true)
       await createTransaction(second, 'Receita', markerB)
+      await secondContext.setOffline(false)
 
       // A mensagem é exibida pelo storage layer em um alerta. Aceitamos a
       // redação atual e a redação anterior para manter o teste compatível
@@ -564,7 +568,7 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       // inequívoco do conflito.
       await expect(
         second.getByRole('alert').filter({
-          hasText: /mais recente.*nuvem.*dados.*preservados/i,
+          hasText: /(?:Há|Existe).*mais recente.*nuvem.*dados.*preservados/i,
         }),
       ).toBeVisible({ timeout: 20_000 })
 
