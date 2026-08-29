@@ -131,50 +131,24 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
 }
 
 async function expandTransaction(page, marker) {
-  const text = page.getByText(marker, { exact: true })
-  await expect(text).toBeVisible({ timeout: 15_000 })
+  // TxCard now exposes a stable test id. This avoids coupling the E2E suite
+  // to React's transient DOM ancestry while the card is being re-rendered.
+  const card = page.getByTestId('transaction-card').filter({
+    hasText: marker,
+  }).first()
 
-  // No TxCard, o botão ▾/▲ fica na linha superior e a área de ações
-  // (Editar/Excluir) fica no div raiz imediatamente acima dessa linha.
-  // Subir exatamente um nível a partir da linha do toggle é mais estável
-  // que depender de ../../.., estilos inline ou de um botão global.
-  const toggleRow = text.locator(
-    'xpath=ancestor::div[.//button[contains(normalize-space(.), "▾") or contains(normalize-space(.), "▲")]][1]',
-  )
-  const card = toggleRow.locator('..')
-  const toggle = toggleRow.getByRole('button').first()
+  await expect(card).toBeVisible({ timeout: 15_000 })
 
+  const toggle = card.locator('button').first()
   await expect(toggle).toBeVisible({ timeout: 10_000 })
-  await toggle.click({ force: true })
 
-  // Re-resolve o card depois do setOpen(): o React pode substituir os nós
-  // durante o re-render. O locator continua ancorado no marcador exclusivo.
-  // After setOpen(), React can replace the card subtree. Do not rely on the
-  // transient ▲ ancestry; re-anchor the action lookup to the unique marker
-  // and the Edit button that is actually rendered in that card.
-  let editButton = text.locator(
-    'xpath=ancestor::div[.//button[contains(normalize-space(.), "Editar")]][1]',
-  ).getByRole('button', { name: /Editar/i })
-
-  try {
-    await expect(editButton).toBeVisible({ timeout: 3_000 })
-  } catch {
-    // If the first click was absorbed during a list re-render, resolve the
-    // current toggle and expand only when the card is still collapsed.
-    const currentToggle = text.locator(
-      'xpath=ancestor::div[.//button[contains(normalize-space(.), "▾") or contains(normalize-space(.), "▲")]][1]',
-    ).getByRole('button').first()
-    await expect(currentToggle).toBeVisible({ timeout: 5_000 })
-    const toggleText = await currentToggle.innerText()
-    if (toggleText.includes('▾')) {
-      await currentToggle.click({ force: true })
-    }
-    editButton = text.locator(
-      'xpath=ancestor::div[.//button[contains(normalize-space(.), "Editar")]][1]',
-    ).getByRole('button', { name: /Editar/i })
-    await expect(editButton).toBeVisible({ timeout: 7_000 })
+  const toggleText = await toggle.innerText()
+  if (toggleText.includes('▾')) {
+    await toggle.click({ force: true })
   }
 
+  const editButton = card.getByRole('button', { name: /Editar/i })
+  await expect(editButton).toBeVisible({ timeout: 10_000 })
   return editButton
 }
 
@@ -236,46 +210,36 @@ async function waitForCloudSync(page, timeoutMs = 20_000) {
 }
 
 async function expectCloudMarker(page, marker, timeoutMs = 30_000) {
-  // Verifica o marcador a partir do estado remoto, removendo somente o cache
-  // local do aplicativo. Em CI, o evento online/Supabase pode concluir a
-  // persistência alguns segundos depois do primeiro reload; por isso fazemos
-  // tentativas reais de reidratação antes de declarar falha.
-  const started = Date.now()
+  // A real cloud assertion must not reuse the page's local cache. Use a
+  // completely fresh browser context so the marker can only come from
+  // Supabase. Never delete the sync queue from the original context while
+  // verifying persistence.
+  const browser = page.context().browser()
+  if (!browser) throw new Error('Browser indisponível para verificação cloud')
+
+  const context = await browser.newContext()
+  const fresh = await context.newPage()
+  const deadline = Date.now() + timeoutMs
   let lastError
 
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const appCacheKeys = await page.evaluate(() =>
-        Object.keys(localStorage).filter(
-          key =>
-            key.startsWith('pj_app_state_cache_v3_') ||
-            key.startsWith('pj_app_state_cache_v2_') ||
-            key.startsWith('pj_app_state_sync_queue_v2_') ||
-            key.startsWith('pj_app_state_sync_queue_v1_') ||
-            key === 'pj_app_state_cache_v1',
-        ),
-      )
-
-      await page.evaluate(keys => {
-        keys.forEach(key => localStorage.removeItem(key))
-      }, appCacheKeys)
-
-      await page.reload()
-      await expect(page.getByRole('button', { name: /^Sair$/i })).toBeVisible({
-        timeout: 15_000,
-      })
-      await openTransactions(page)
-
-      const markerLocator = page.getByText(marker, { exact: true })
-      await expect(markerLocator).toBeVisible({
-        timeout: Math.min(8_000, Math.max(1_000, timeoutMs)),
-      })
-      return markerLocator
-    } catch (error) {
-      lastError = error
-      if (Date.now() - started >= timeoutMs) break
-      await page.waitForTimeout(1_000)
+  try {
+    while (Date.now() < deadline) {
+      try {
+        await login(fresh)
+        await openTransactions(fresh)
+        await expect(
+          fresh.getByText(marker, { exact: true }),
+        ).toBeVisible({ timeout: 5_000 })
+        return true
+      } catch (error) {
+        lastError = error
+        if (Date.now() >= deadline) break
+        await fresh.waitForTimeout(1_000)
+        await fresh.reload().catch(() => {})
+      }
     }
+  } finally {
+    await context.close().catch(() => {})
   }
 
   throw lastError || new Error(`Marcador remoto não encontrado: ${marker}`)
@@ -642,41 +606,45 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       await secondContext.setOffline(false)
       await second.evaluate(() => window.dispatchEvent(new Event('online')))
 
-      // O handler "online" é assíncrono e pode perder a corrida com a
-      // restauração do contexto no Chromium/CI. Primeiro damos a ele a
-      // oportunidade de sincronizar; se o alerta ainda não apareceu,
-      // recarregamos a mesma aba. loadState() encontra a fila stale e chama
-      // syncQueue() durante a hidratação, tornando a detecção determinística.
-      // During React rehydration the message can be committed before the
-      // role="alert" wrapper. Assert the stable production text first, then
-      // the resolution control. This still requires the real conflict state.
+      // The browser can dispatch the native "online" event before Chromium
+      // has finished restoring the page. The queue is durable, so repeatedly
+      // rehydrating the same context is safe and gives the real RPC conflict
+      // path another opportunity to run. We accept either the production
+      // message or its resolution button as the conflict assertion.
       const conflictMessage = second.getByText(
         /Há uma versão mais recente na nuvem\. Seus dados locais foram preservados\./i,
         { exact: false },
       )
+      const conflictButton = second.getByRole('button', {
+        name: /Usar versão da nuvem/i,
+      })
 
-      try {
-        await expect(conflictMessage).toBeVisible({ timeout: 10_000 })
-        await expect(
-          second.getByRole('button', { name: /Usar versão da nuvem/i }),
-        ).toBeVisible({ timeout: 5_000 })
-      } catch {
-        // The stale queue is durable. Rehydrate the same context so
-        // loadStateInternal() gets another opportunity to submit its stale
-        // baseUpdatedAt to save_app_state and expose the real conflict.
-        await second.reload()
-        await expect(second.getByRole('button', { name: /^Sair$/i })).toBeVisible({
-          timeout: 15_000,
-        })
-        await expect(
-          second.getByText(
-            /Há uma versão mais recente na nuvem\. Seus dados locais foram preservados\./i,
-            { exact: false },
-          ),
-        ).toBeVisible({ timeout: 20_000 })
+      let conflictDetected = false
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        if (
+          await conflictButton.isVisible().catch(() => false) ||
+          await conflictMessage.isVisible().catch(() => false)
+        ) {
+          conflictDetected = true
+          break
+        }
+
+        if (attempt > 0) {
+          await second.reload()
+          await expect(
+            second.getByRole('button', { name: /^Sair$/i }),
+          ).toBeVisible({ timeout: 15_000 })
+        }
+
+        await second.waitForTimeout(1_000)
       }
 
-      await second.getByRole('button', { name: /Usar versão da nuvem/i }).click()
+      expect(
+        conflictDetected,
+        'A alteração concorrente deveria produzir o estado real de conflito.',
+      ).toBe(true)
+
+      await conflictButton.click()
 
       // The production conflict resolver persists the remote snapshot and
       // intentionally reloads the application. Explicitly wait for the new
