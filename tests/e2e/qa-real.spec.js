@@ -147,16 +147,13 @@ async function expandTransaction(page, marker) {
   // Depois da abertura, procure novamente a partir do marcador. O TxCard
   // raiz é agora o ancestral mais próximo que contém o botão "Editar".
   // Isso também sobrevive ao re-render do React provocado pelo setOpen().
-  const expandedCard = text.locator(
-    'xpath=ancestor::div[.//button[contains(normalize-space(.), "Editar")]][1]',
-  )
-  await expect(expandedCard).toBeVisible({ timeout: 10_000 })
-  await expect(
-    expandedCard.getByRole('button', { name: /Editar/i }),
-  ).toBeVisible({
-    timeout: 10_000,
-  })
-  return expandedCard
+  // O TxCard não possui uma classe/role própria e o React pode substituir
+  // seus nós durante o setOpen(). Portanto, depois de abrir, use o botão
+  // de ação realmente renderizado na página. Apenas o card aberto possui
+  // "Editar" e "Excluir", então esses locators permanecem inequívocos.
+  const editButton = page.getByRole('button', { name: /Editar/i }).last()
+  await expect(editButton).toBeVisible({ timeout: 10_000 })
+  return editButton
 }
 
 async function deleteTransaction(page, marker) {
@@ -174,8 +171,11 @@ async function deleteTransaction(page, marker) {
     await openTransactions(page)
   }
 
-  const card = await expandTransaction(page, marker)
-  await card.getByRole('button', { name: /Excluir/i }).click()
+  await expandTransaction(page, marker)
+  // Depois de expandir, só o TxCard aberto expõe o botão "Excluir".
+  const deleteButton = page.getByRole('button', { name: /Excluir/i }).last()
+  await expect(deleteButton).toBeVisible({ timeout: 10_000 })
+  await deleteButton.click()
   await expect(page.getByText(marker, { exact: true })).toHaveCount(0, { timeout: 10_000 })
 }
 
@@ -398,8 +398,8 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
     await page.getByRole('button', { name: '✕' }).click()
 
     await openTransactions(page)
-    const card = await expandTransaction(page, QA_MARKER)
-    await card.getByRole('button', { name: /Editar/i }).click()
+    const editButton = await expandTransaction(page, QA_MARKER)
+    await editButton.click()
     await fieldControl(page, 'Nome da Clínica *', 'input').fill(QA_EDITED)
     await page.getByRole('button', { name: 'Salvar Alterações', exact: true }).click()
     await expect(page.getByText(QA_EDITED, { exact: true })).toBeVisible({ timeout: 15_000 })
@@ -601,15 +601,25 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       await secondContext.setOffline(false)
       await second.evaluate(() => window.dispatchEvent(new Event('online')))
 
-      // A mensagem é exibida pelo storage layer em um alerta. Aceitamos a
-      // redação atual e a redação anterior para manter o teste compatível
-      // durante a evolução do texto, mas exigimos sempre o núcleo semântico
-      // inequívoco do conflito.
-      await expect(
-        second.getByRole('alert').filter({
-          hasText: /(?:Há|Existe).*versão.*mais recente.*nuvem.*(?:dados.*preservados|preservados)/i,
-        }),
-      ).toBeVisible({ timeout: 20_000 })
+      // O handler "online" é assíncrono e pode perder a corrida com a
+      // restauração do contexto no Chromium/CI. Primeiro damos a ele a
+      // oportunidade de sincronizar; se o alerta ainda não apareceu,
+      // recarregamos a mesma aba. loadState() encontra a fila stale e chama
+      // syncQueue() durante a hidratação, tornando a detecção determinística.
+      const conflictAlert = second.getByRole('alert').filter({
+        hasText: /(?:Há|Existe).*versão.*mais recente.*nuvem.*(?:dados.*preservados|preservados)/i,
+      })
+
+      try {
+        await expect(conflictAlert).toBeVisible({ timeout: 8_000 })
+      } catch {
+        await second.reload()
+        await expect(second.getByRole('button', { name: /^Sair$/i })).toBeVisible({
+          timeout: 15_000,
+        })
+        await openTransactions(second)
+        await expect(conflictAlert).toBeVisible({ timeout: 20_000 })
+      }
 
       await second.getByRole('button', { name: /Usar versão da nuvem/i }).click()
 
