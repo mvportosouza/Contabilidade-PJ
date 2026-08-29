@@ -149,11 +149,32 @@ async function expandTransaction(page, marker) {
 
   // Re-resolve o card depois do setOpen(): o React pode substituir os nós
   // durante o re-render. O locator continua ancorado no marcador exclusivo.
-  const expandedCard = text.locator(
-    'xpath=ancestor::div[.//button[contains(normalize-space(.), "▲")]][1]/..',
-  )
-  const editButton = expandedCard.getByRole('button', { name: /Editar/i })
-  await expect(editButton).toBeVisible({ timeout: 10_000 })
+  // After setOpen(), React can replace the card subtree. Do not rely on the
+  // transient ▲ ancestry; re-anchor the action lookup to the unique marker
+  // and the Edit button that is actually rendered in that card.
+  let editButton = text.locator(
+    'xpath=ancestor::div[.//button[contains(normalize-space(.), "Editar")]][1]',
+  ).getByRole('button', { name: /Editar/i })
+
+  try {
+    await expect(editButton).toBeVisible({ timeout: 3_000 })
+  } catch {
+    // If the first click was absorbed during a list re-render, resolve the
+    // current toggle and expand only when the card is still collapsed.
+    const currentToggle = text.locator(
+      'xpath=ancestor::div[.//button[contains(normalize-space(.), "▾") or contains(normalize-space(.), "▲")]][1]',
+    ).getByRole('button').first()
+    await expect(currentToggle).toBeVisible({ timeout: 5_000 })
+    const toggleText = await currentToggle.innerText()
+    if (toggleText.includes('▾')) {
+      await currentToggle.click({ force: true })
+    }
+    editButton = text.locator(
+      'xpath=ancestor::div[.//button[contains(normalize-space(.), "Editar")]][1]',
+    ).getByRole('button', { name: /Editar/i })
+    await expect(editButton).toBeVisible({ timeout: 7_000 })
+  }
+
   return editButton
 }
 
@@ -626,19 +647,33 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       // oportunidade de sincronizar; se o alerta ainda não apareceu,
       // recarregamos a mesma aba. loadState() encontra a fila stale e chama
       // syncQueue() durante a hidratação, tornando a detecção determinística.
-      const conflictAlert = second.getByRole('alert').filter({
-        hasText: /(?:Há|Existe).*versão.*mais recente.*nuvem.*(?:dados.*preservados|preservados)/i,
-      })
+      // During React rehydration the message can be committed before the
+      // role="alert" wrapper. Assert the stable production text first, then
+      // the resolution control. This still requires the real conflict state.
+      const conflictMessage = second.getByText(
+        /Há uma versão mais recente na nuvem\. Seus dados locais foram preservados\./i,
+        { exact: false },
+      )
 
       try {
-        await expect(conflictAlert).toBeVisible({ timeout: 8_000 })
+        await expect(conflictMessage).toBeVisible({ timeout: 10_000 })
+        await expect(
+          second.getByRole('button', { name: /Usar versão da nuvem/i }),
+        ).toBeVisible({ timeout: 5_000 })
       } catch {
+        // The stale queue is durable. Rehydrate the same context so
+        // loadStateInternal() gets another opportunity to submit its stale
+        // baseUpdatedAt to save_app_state and expose the real conflict.
         await second.reload()
         await expect(second.getByRole('button', { name: /^Sair$/i })).toBeVisible({
           timeout: 15_000,
         })
-        await openTransactions(second)
-        await expect(conflictAlert).toBeVisible({ timeout: 20_000 })
+        await expect(
+          second.getByText(
+            /Há uma versão mais recente na nuvem\. Seus dados locais foram preservados\./i,
+            { exact: false },
+          ),
+        ).toBeVisible({ timeout: 20_000 })
       }
 
       await second.getByRole('button', { name: /Usar versão da nuvem/i }).click()
