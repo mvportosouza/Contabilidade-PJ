@@ -1,6 +1,6 @@
 import { Card, SmLabel, BigVal } from "../AppUI";
 
-export function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,MONTHS,totalObrig,C,fmtBRL,setNotaModal,openTaxation,contasPagar}){
+export function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,MONTHS,totalObrig,C,fmtBRL,setNotaModal,openTaxation,contasPagar,dividendSummary}){
   return(<>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
       <Card><SmLabel>Receita</SmLabel><BigVal color={C.navyMid}>{fmtBRL(receitas)}</BigVal></Card>
@@ -59,6 +59,23 @@ export function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,M
         </Card>
       );
     })()}
+    <Card style={{marginBottom:12}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
+        <div>
+          <SmLabel>Lucros & Dividendos</SmLabel>
+          <p style={{margin:"5px 0 0",fontSize:22,fontWeight:"bold",color:C.gold}}>{fmtBRL(dividendSummary?.total||0)}</p>
+          <p style={{margin:"3px 0 0",fontSize:10,color:C.muted}}>Distribuído no mês</p>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <p style={{margin:0,fontSize:12,fontWeight:"700",color:(dividendSummary?.taxableTotal||0)>50000?C.red:C.navyMid}}>
+            {fmtBRL(Math.max(0,50000-(dividendSummary?.taxableTotal||0)))} restantes
+          </p>
+          <p style={{margin:"4px 0 0",fontSize:10,color:C.muted}}>limite mensal por PJ + beneficiário</p>
+        </div>
+      </div>
+      {(dividendSummary?.irrf||0)>0 && <div style={{marginTop:10,background:C.redLight,borderRadius:10,padding:"9px 11px",fontSize:11,color:C.red,fontWeight:"700"}}>🔴 IRRF estimado: {fmtBRL(dividendSummary.irrf)} · 10% sobre a distribuição sujeita à regra.</div>}
+      {(dividendSummary?.groups||[]).some(g=>g.status==="proximo"||g.status==="limite") && <div style={{marginTop:10,background:"#FFF8F0",borderRadius:10,padding:"9px 11px",fontSize:11,color:"#9A6500",fontWeight:"700"}}>⚠️ Há distribuição próxima do limite mensal de R$ 50.000,00.</div>}
+    </Card>
     <Card style={{marginBottom:12}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,marginBottom:12}}>
         <div>
