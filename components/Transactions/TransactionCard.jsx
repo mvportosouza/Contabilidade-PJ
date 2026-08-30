@@ -19,7 +19,11 @@ export function TxCard({tx,onEdit,onDelete,C,fmtBRL,MONTHS}){
           <p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{tx.nome||"—"}</p>
           {tx.especialidade&&<p style={{margin:"1px 0 0",fontSize:11,color:C.gold,fontWeight:"600"}}>{tx.especialidade}{tx.dente?" · Dente "+tx.dente:""}</p>}
           {tx.descricao&&<p style={{margin:"1px 0 0",fontSize:11,color:"#BBB",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{tx.descricao}</p>}
-          {isR&&<span style={{display:"inline-block",marginTop:3,fontSize:10,background:tx.notaGerada?"#EBF5EE":C.redLight,color:tx.notaGerada?C.navyMid:C.red,borderRadius:5,padding:"2px 7px",fontWeight:"600"}}>{tx.notaGerada?`✅ NF${tx.numeroNota?" #"+tx.numeroNota:""}`:   "⏳ NF Pendente"}</span>}
+          {isR&&<span style={{display:"inline-block",marginTop:3,fontSize:10,background:tx.notaGerada?"#EBF5EE":C.redLight,color:tx.notaGerada?C.navyMid:C.red,borderRadius:5,padding:"2px 7px",fontWeight:"600"}}>{tx.notaGerada?`✅ NF${tx.numeroNota?" #"+tx.numeroNota:""}`:   "⏳ NF Pendente"}</span>} 
+          {isD&&<div style={{marginTop:4,fontSize:10,color:C.muted}}>
+            {tx.beneficiarioCpf?`CPF ${tx.beneficiarioCpf}`:"CPF não informado"} · {tx.origemLucro==="anteriores_2025"?"Lucro anterior a 2026":"Lucro apurado em 2026"}
+          </div>} 
+          {isD&&Number(tx.irrfDistribuicao)>0&&<div style={{marginTop:3,fontSize:10,color:C.red,fontWeight:"700"}}>IRRF {fmtBRL(tx.irrfDistribuicao)} · Líquido {fmtBRL(tx.valorLiquidoDistribuicao)}</div>}
         </div>
         <div style={{textAlign:"right",flexShrink:0}}>
           <p style={{margin:0,fontSize:15,fontWeight:"bold",color:txColor}}>{isR?"+":isD?"":"-"}{fmtBRL(tx.valor)}</p>
