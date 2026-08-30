@@ -5,6 +5,7 @@ import { deleteAllAppData, sGet, sSet, replaceState } from "../lib/storage";
 import { updatePassword, deleteAccount } from "../lib/auth";
 import { ACCOUNTING_PL_BY_MONTH, reconcileLegacyAccountingPL } from "../lib/accounting";
 import { BACKUP_VERSION, MAX_BACKUP_BYTES, cryptoId, normalizeBackup, normalizeDateOnly } from "../lib/validators";
+import { calculateMonthlyDividends, withCalculatedDividendHistory } from "../lib/dividends";
 import { calculateMonthlyFinance } from "../lib/finance";
 import {
   calcINSS,
@@ -65,7 +66,7 @@ function App() {
 
   useEffect(()=>{
     (async()=>{
-      const t=sortTransactions(await sGet("pj_tx2")||[]);
+      const t=sortTransactions(withCalculatedDividendHistory(await sGet("pj_tx2")||[]));
       const fv=sortFavorites(await sGet("pj_favs2")||[]);
       const pl=await sGet("pj_pl")||{};
       const pmStored=await sGet("pj_plm")||{};
@@ -130,6 +131,13 @@ function App() {
   const despesas = financeMonth.despesas;
   const distribuicoes = financeMonth.distribuicoes || 0;
   const resultado = financeMonth.resultado;
+  const dividendGroups = calculateMonthlyDividends(txs, year, month);
+  const dividendSummary = {
+    total: dividendGroups.reduce((s,g)=>s+g.total,0),
+    taxableTotal: dividendGroups.reduce((s,g)=>s+g.taxableTotal,0),
+    irrf: dividendGroups.reduce((s,g)=>s+g.irrf,0),
+    groups: dividendGroups,
+  };
 
   // Mapa efetivo do pró-labore: valores da contabilidade corrigem os meses
   // informados, enquanto um override manual do usuário continua tendo prioridade.
@@ -187,10 +195,10 @@ function App() {
 
   /* ── Savers ── */
   const saveTxs=async d=>{
-    const sorted=sortTransactions(d);
+    const sorted=sortTransactions(withCalculatedDividendHistory(d));
     setTxs(sorted); await sSet("pj_tx2",sorted);
     const freshM=await sGet("pj_plm")||{};
-    const up=await cascadePL(d,freshM);
+    const up=await cascadePL(sorted,freshM);
     setPlMap(up);
   };
   const saveFavs=async d=>{const sorted=sortFavorites(d);setFavs(sorted);await sSet("pj_favs2",sorted);};
@@ -235,7 +243,10 @@ function App() {
   const openNew=tipo=>{setEditId(null);setFormTipo(tipo);setForm(createBlankForm());setShowForm(true);};
   const openEdit=tx=>{
     setEditId(tx.id);setFormTipo(tx.tipo);
-    setForm({valor:fmtIn(String(Math.round(tx.valor*100))),data:tx.data,nome:tx.nome||"",cnpj:tx.cnpj||"",telefone:tx.telefone||"",cep:tx.cep||"",endereco:tx.endereco||"",email:tx.email||"",especialidade:tx.especialidade||"",dente:tx.dente||"",categoria:tx.categoria||"",descricao:tx.descricao||"",notaGerada:tx.notaGerada||false,numeroNota:tx.numeroNota||"",dataEmissao:tx.dataEmissao||"",taxaISS:tx.taxaISS||"",informadoContab:tx.informadoContab||false,saveAsFav:false});
+    setForm({valor:fmtIn(String(Math.round(tx.valor*100))),data:tx.data,nome:tx.nome||"",cnpj:tx.cnpj||"",telefone:tx.telefone||"",cep:tx.cep||"",endereco:tx.endereco||"",email:tx.email||"",especialidade:tx.especialidade||"",dente:tx.dente||"",categoria:tx.categoria||"",descricao:tx.descricao||"",notaGerada:tx.notaGerada||false,numeroNota:tx.numeroNota||"",dataEmissao:tx.dataEmissao||"",taxaISS:tx.taxaISS||"",informadoContab:tx.informadoContab||false,saveAsFav:false,
+      beneficiarioNome:tx.beneficiarioNome||tx.nome||"",beneficiarioCpf:tx.beneficiarioCpf||"",
+      pjCnpj:tx.pjCnpj||tx.cnpj||"",origemLucro:tx.origemLucro||"apurados_2026",
+      aprovacaoDistribuicao:tx.aprovacaoDistribuicao||"",pagamentoPrevistoOriginal:tx.pagamentoPrevistoOriginal||""});
     setShowForm(true);
   };
   const handleCat=cat=>{
@@ -257,9 +268,23 @@ function App() {
     if(!form.valor||!form.data){notify("Informe valor e data.","err");return;}
     if(formTipo==="receita"&&!form.nome){notify("Informe o nome da clínica.","err");return;}
     if(formTipo==="despesa"&&!form.categoria){notify("Selecione o tipo de despesa.","err");return;}
+    if(formTipo==="distribuicao"){
+      if(!form.beneficiarioNome?.trim()){notify("Informe o beneficiário.","err");return;}
+      if(String(form.beneficiarioCpf||"").replace(/\D/g,"").length!==11){notify("Informe um CPF válido do beneficiário.","err");return;}
+      if(String(form.pjCnpj||"").replace(/\D/g,"").length!==14){notify("Informe o CNPJ da PJ pagadora.","err");return;}
+      if(form.origemLucro==="anteriores_2025" && (!form.aprovacaoDistribuicao || form.aprovacaoDistribuicao > "2025-12-31" || !form.pagamentoPrevistoOriginal || form.pagamentoPrevistoOriginal < "2026-01-01" || form.pagamentoPrevistoOriginal > "2028-12-31")){notify("Para usar o tratamento de lucro anterior, informe aprovação até 31/12/2025 e pagamento original entre 2026 e 2028.","err");return;}
+    }
     const valor=parseBRL(form.valor); if(valor<=0){notify("Valor inválido.","err");return;}
-    const normalizedData = normalizeDateOnly(form.data); if(!normalizedData){notify("Data inválida.","err");return;} const tx={id:editId||cryptoId(),tipo:formTipo,valor,data:normalizedData,nome:form.nome||form.categoria||(formTipo==="distribuicao"?"Distribuição de Lucros":""),cnpj:form.cnpj,telefone:form.telefone,cep:form.cep,endereco:form.endereco,email:form.email,especialidade:form.especialidade,dente:form.dente,categoria:form.categoria,descricao:form.descricao,notaGerada:form.notaGerada,numeroNota:form.notaGerada?form.numeroNota:"",dataEmissao:form.notaGerada?(normalizeDateOnly(form.dataEmissao)||""):"",taxaISS:form.notaGerada?form.taxaISS:"",informadoContab:form.notaGerada?form.informadoContab:false};
-    await saveTxs(editId?txs.map(t=>t.id===editId?tx:t):[tx,...txs]);
+    const normalizedData = normalizeDateOnly(form.data); if(!normalizedData){notify("Data inválida.","err");return;} const tx={id:editId||cryptoId(),tipo:formTipo,valor,data:normalizedData,nome:form.nome||form.categoria||(formTipo==="distribuicao"?"Distribuição de Lucros":""),cnpj:form.cnpj,telefone:form.telefone,cep:form.cep,endereco:form.endereco,email:form.email,especialidade:form.especialidade,dente:form.dente,categoria:form.categoria,descricao:form.descricao,notaGerada:form.notaGerada,numeroNota:form.notaGerada?form.numeroNota:"",dataEmissao:form.notaGerada?(normalizeDateOnly(form.dataEmissao)||""):"",taxaISS:form.notaGerada?form.taxaISS:"",informadoContab:form.notaGerada?form.informadoContab:false,
+      beneficiarioNome:formTipo==="distribuicao"?(form.beneficiarioNome||""):"",
+      beneficiarioCpf:formTipo==="distribuicao"?(form.beneficiarioCpf||""):"",
+      pjCnpj:formTipo==="distribuicao"?(form.pjCnpj||""):"",
+      origemLucro:formTipo==="distribuicao"?(form.origemLucro||"apurados_2026"):"",
+      aprovacaoDistribuicao:formTipo==="distribuicao"?(normalizeDateOnly(form.aprovacaoDistribuicao)||""):"",
+      pagamentoPrevistoOriginal:formTipo==="distribuicao"?(normalizeDateOnly(form.pagamentoPrevistoOriginal)||""):"",
+      irrfDistribuicao:0, valorLiquidoDistribuicao:formTipo==="distribuicao"?valor:0};
+    const nextTxs = editId ? txs.map(t=>t.id===editId?tx:t) : [tx,...txs];
+    await saveTxs(nextTxs);
     if(form.saveAsFav && formTipo!=="distribuicao"){
       const key=formTipo==="receita"?form.nome:form.categoria;
       const fd={id:cryptoId(),tipo:formTipo,nome:key,cnpj:form.cnpj,telefone:form.telefone,cep:form.cep,endereco:form.endereco,email:form.email,especialidade:form.especialidade,categoria:form.categoria};
@@ -611,7 +636,7 @@ function App() {
             monthTxs={monthTxs} receitas={receitas} despesas={despesas} resultado={resultado}
             saldo={saldo} month={month} year={year} MONTHS={MONTHS}
             totalObrig={totalObrig} C={C} fmtBRL={fmtMoney} openTaxation={openTaxation}
-            setNotaModal={setNotaModal}
+            setNotaModal={setNotaModal} dividendSummary={dividendSummary}
             contasPagar={getPreviousMonthPayables({
               txs, effectivePlMap, ctbMap, irrfMap, year, month, calcTributacao, calcIRRF
             })}
@@ -624,6 +649,7 @@ function App() {
             monthTxs={monthTxs} receitas={receitas} despesas={despesas} resultado={resultado}
             month={month} year={year} MONTHS={MONTHS} C={C} fmtBRL={fmtMoney}
             openNew={openNew} openEdit={openEdit} delTx={delTx}
+            dividendSummary={dividendSummary}
           />
         )}
 
@@ -694,6 +720,32 @@ function App() {
               <textarea value={form.descricao} onChange={e=>setForm(f=>({...f,descricao:e.target.value}))} rows={3} placeholder="Detalhes..." style={{...iSt,resize:"none",lineHeight:1.5}}/>
             </Field>
           </> : formTipo==="distribuicao" ? <>
+            <Field label="Beneficiário *">
+              <input value={form.beneficiarioNome} onChange={e=>setForm(f=>({...f,beneficiarioNome:e.target.value}))} placeholder="Nome do sócio / beneficiário" style={iSt}/>
+            </Field>
+            <Field label="CPF do Beneficiário *">
+              <input value={form.beneficiarioCpf} onChange={e=>setForm(f=>({...f,beneficiarioCpf:fmtDoc(e.target.value)}))} placeholder="000.000.000-00" inputMode="numeric" style={iSt}/>
+            </Field>
+            <Field label="CNPJ da PJ Pagadora *">
+              <input value={form.pjCnpj} onChange={e=>setForm(f=>({...f,pjCnpj:fmtDoc(e.target.value)}))} placeholder="00.000.000/0000-00" inputMode="numeric" style={iSt}/>
+            </Field>
+            <Field label="Origem do Lucro *">
+              <div style={{display:"flex",gap:8}}>
+                <TogBtn active={form.origemLucro==="apurados_2026"} color={C.navyMid} bg={C.navyLight} onClick={()=>setForm(f=>({...f,origemLucro:"apurados_2026"}))}>Apurados em 2026</TogBtn>
+                <TogBtn active={form.origemLucro==="anteriores_2025"} color={C.gold} bg="#F8F1E5" onClick={()=>setForm(f=>({...f,origemLucro:"anteriores_2025"}))}>Anteriores</TogBtn>
+              </div>
+            </Field>
+            {form.origemLucro==="anteriores_2025" && <>
+              <Field label="Data da aprovação *">
+                <input type="date" value={form.aprovacaoDistribuicao||""} onChange={e=>setForm(f=>({...f,aprovacaoDistribuicao:e.target.value}))} style={iSt}/>
+              </Field>
+              <Field label="Pagamento previsto originalmente">
+                <input type="date" value={form.pagamentoPrevistoOriginal||""} onChange={e=>setForm(f=>({...f,pagamentoPrevistoOriginal:e.target.value}))} style={iSt}/>
+              </Field>
+              <div style={{background:"#F8F1E5",borderRadius:12,padding:"11px 13px",marginBottom:13,fontSize:11,color:"#795E2D",lineHeight:1.45}}>
+                Lucros apurados até 31/12/2025 só ficam fora do IRRF de 2026 quando a distribuição foi aprovada até 31/12/2025 e o pagamento observa as condições do ato de aprovação.
+              </div>
+            </>}
             <Field label="Descrição">
               <input value={form.descricao} onChange={e=>setForm(f=>({...f,descricao:e.target.value}))} placeholder="Ex: Distribuição de lucros" style={iSt}/>
             </Field>

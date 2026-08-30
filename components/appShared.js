@@ -50,6 +50,12 @@ const createBlankForm = (date = new Date()) => ({
   notaGerada: false,
   numeroNota: "",
   saveAsFav: false,
+  beneficiarioNome: "",
+  beneficiarioCpf: "",
+  pjCnpj: "",
+  origemLucro: "apurados_2026",
+  aprovacaoDistribuicao: "",
+  pagamentoPrevistoOriginal: "",
 });
 
 const formatPhone = value => {
