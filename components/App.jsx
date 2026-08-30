@@ -1,10 +1,9 @@
 'use client';
 import Image from "next/image";
 import { useState, useEffect, useRef } from "react";
-import { deleteAllAppData, sGet, sSet, clearStorageCache, replaceState } from "../lib/storage";
-import { updatePassword } from "../lib/auth";
+import { deleteAllAppData, sGet, sSet, replaceState } from "../lib/storage";
+import { updatePassword, deleteAccount } from "../lib/auth";
 import { ACCOUNTING_PL_BY_MONTH, reconcileLegacyAccountingPL } from "../lib/accounting";
-import { supabase } from "../lib/supabaseClient";
 import { BACKUP_VERSION, MAX_BACKUP_BYTES, cryptoId, normalizeBackup, normalizeDateOnly } from "../lib/validators";
 import { calculateMonthlyFinance } from "../lib/finance";
 import {
@@ -1142,11 +1141,9 @@ function App() {
                   if(!second) return;
                   setAccountActionBusy(true);
                   try{
-                    const {error}=await supabase.functions.invoke("delete-account");
-                    if(error) throw error;
-                    await clearStorageCache();
-                    try{ await supabase.auth.signOut(); }catch{}
-                    window.location.reload();
+                    await deleteAccount();
+                    window.location.replace("/");
+
                   }catch(e){
                     notify(e?.message||"Não foi possível excluir a conta.","err");
                   }finally{
