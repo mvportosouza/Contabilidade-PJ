@@ -1,11 +1,11 @@
 'use client';
 import Image from "next/image";
 import { useState, useEffect, useRef } from "react";
-import { deleteAllAppData, sGet, sSet, clearStorageCache } from "../lib/storage";
+import { deleteAllAppData, sGet, sSet, clearStorageCache, replaceState } from "../lib/storage";
 import { updatePassword } from "../lib/auth";
 import { ACCOUNTING_PL_BY_MONTH, reconcileLegacyAccountingPL } from "../lib/accounting";
 import { supabase } from "../lib/supabaseClient";
-import { BACKUP_VERSION, cryptoId, normalizeBackup, normalizeDateOnly } from "../lib/validators";
+import { BACKUP_VERSION, MAX_BACKUP_BYTES, cryptoId, normalizeBackup, normalizeDateOnly } from "../lib/validators";
 import { calculateMonthlyFinance } from "../lib/finance";
 import {
   calcINSS,
@@ -323,100 +323,107 @@ function App() {
   const textDecoder = typeof TextDecoder !== "undefined" ? new TextDecoder() : null;
 
   const bytesToBase64 = bytes => {
-    let binary = "";
-    const chunkSize = 0x8000;
-    for(let i=0;i<bytes.length;i+=chunkSize){
-      binary += String.fromCharCode(...bytes.subarray(i,i+chunkSize));
+    let binary="";
+    const chunk=0x8000;
+    for(let i=0;i<bytes.length;i+=chunk){
+      binary+=String.fromCharCode(...bytes.subarray(i,i+chunk));
     }
     return btoa(binary);
   };
 
   const base64ToBytes = value => {
-    const binary = atob(value);
-    const bytes = new Uint8Array(binary.length);
+    if(typeof value!=="string" || !/^[A-Za-z0-9+/]*={0,2}$/.test(value) || value.length%4!==0){
+      throw new Error("Backup criptografado inválido.");
+    }
+    const binary=atob(value);
+    const bytes=new Uint8Array(binary.length);
     for(let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i);
     return bytes;
+  };
+
+  const sha256Hex = async bytes => {
+    if(!window.crypto?.subtle) throw new Error("Seu navegador não oferece suporte à validação de integridade do backup.");
+    const digest=await window.crypto.subtle.digest("SHA-256",bytes);
+    return [...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,"0")).join("");
   };
 
   const deriveBackupKey = async (password, salt) => {
     if(!window.crypto?.subtle) {
       throw new Error("Seu navegador não oferece suporte à criptografia segura necessária para o backup.");
     }
-    const material = await window.crypto.subtle.importKey(
-      "raw",
-      textEncoder.encode(password),
-      "PBKDF2",
-      false,
-      ["deriveKey"]
+    const material=await window.crypto.subtle.importKey(
+      "raw", textEncoder.encode(password), "PBKDF2", false, ["deriveKey"]
     );
     return window.crypto.subtle.deriveKey(
-      {
-        name:"PBKDF2",
-        salt,
-        iterations:250000,
-        hash:"SHA-256",
-      },
-      material,
-      {name:"AES-GCM",length:256},
-      false,
-      ["encrypt","decrypt"]
+      {name:"PBKDF2",salt,iterations:250000,hash:"SHA-256"},
+      material,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]
     );
   };
 
   const encryptBackup = async (backup,password) => {
-    const salt = window.crypto.getRandomValues(new Uint8Array(16));
-    const iv = window.crypto.getRandomValues(new Uint8Array(12));
-    const key = await deriveBackupKey(password,salt);
-    const plaintext = textEncoder.encode(JSON.stringify(backup));
-    const ciphertext = new Uint8Array(
-      await window.crypto.subtle.encrypt(
-        {name:"AES-GCM",iv},
-        key,
-        plaintext
-      )
-    );
+    const salt=window.crypto.getRandomValues(new Uint8Array(16));
+    const iv=window.crypto.getRandomValues(new Uint8Array(12));
+    const key=await deriveBackupKey(password,salt);
+    const plaintext=textEncoder.encode(JSON.stringify(backup));
+    if(plaintext.byteLength>MAX_BACKUP_BYTES) {
+      throw new Error("O backup excede o limite de 5 MB.");
+    }
+    const checksum=await sha256Hex(plaintext);
+    const ciphertext=new Uint8Array(await window.crypto.subtle.encrypt({name:"AES-GCM",iv},key,plaintext));
 
     return {
       format:"contabilidade-pj-encrypted-backup",
-      version:1,
+      version:2,
       algorithm:"AES-256-GCM",
       kdf:"PBKDF2-SHA-256",
       iterations:250000,
       salt:bytesToBase64(salt),
       iv:bytesToBase64(iv),
       data:bytesToBase64(ciphertext),
+      integrity:{algorithm:"SHA-256",value:checksum},
+      backupVersion:backup.version,
       encryptedAt:new Date().toISOString(),
     };
   };
 
   const decryptBackup = async (envelope,password) => {
-    if(!envelope ||
+    if(!envelope || typeof envelope!=="object" || Array.isArray(envelope) ||
        envelope.format!=="contabilidade-pj-encrypted-backup" ||
-       envelope.version!==1 ||
+       ![1,2].includes(envelope.version) ||
        envelope.algorithm!=="AES-256-GCM" ||
-       envelope.kdf!=="PBKDF2-SHA-256"){
+       envelope.kdf!=="PBKDF2-SHA-256" || envelope.iterations!==250000){
       throw new Error("Este arquivo não é um backup criptografado compatível.");
     }
 
-    if(envelope.iterations!==250000){
-      throw new Error("Parâmetros de segurança do backup não são compatíveis.");
+    if(envelope.version===2){
+      if(!envelope.integrity || envelope.integrity.algorithm!=="SHA-256" ||
+         typeof envelope.integrity.value!=="string" || !/^[a-f0-9]{64}$/.test(envelope.integrity.value)){
+        throw new Error("Backup inválido: integridade ausente ou inválida.");
+      }
+      if(!Number.isInteger(envelope.backupVersion) || envelope.backupVersion<1 || envelope.backupVersion>BACKUP_VERSION){
+        throw new Error("Versão do backup inválida.");
+      }
     }
 
     try{
       const salt=base64ToBytes(envelope.salt);
       const iv=base64ToBytes(envelope.iv);
+      if(salt.byteLength!==16 || iv.byteLength!==12) throw new Error("Parâmetros de segurança inválidos.");
       const ciphertext=base64ToBytes(envelope.data);
-      const key=await deriveBackupKey(password,salt);
-      const plainBuffer=await window.crypto.subtle.decrypt(
-        {name:"AES-GCM",iv},
-        key,
-        ciphertext
-      );
-      return JSON.parse(textDecoder.decode(new Uint8Array(plainBuffer)));
-    }catch(e){
-      if(e?.message?.includes("backup") || e?.message?.includes("Parâmetros")){
-        throw e;
+      if(ciphertext.byteLength<16 || ciphertext.byteLength>MAX_BACKUP_BYTES*2){
+        throw new Error("Backup criptografado inválido ou acima do limite permitido.");
       }
+      const key=await deriveBackupKey(password,salt);
+      const plainBuffer=await window.crypto.subtle.decrypt({name:"AES-GCM",iv},key,ciphertext);
+      if(plainBuffer.byteLength>MAX_BACKUP_BYTES) throw new Error("O backup excede o limite de 5 MB.");
+      const plainBytes=new Uint8Array(plainBuffer);
+      if(envelope.version===2){
+        const checksum=await sha256Hex(plainBytes);
+        if(checksum!==envelope.integrity.value) throw new Error("Backup corrompido: falha de integridade.");
+      }
+      return JSON.parse(textDecoder.decode(plainBytes));
+    }catch(e){
+      if(e?.message?.includes("integridade") || e?.message?.includes("limite") || e?.message?.includes("inválido") || e?.message?.includes("Parâmetros")) throw e;
       throw new Error("Senha incorreta ou backup criptografado inválido.");
     }
   };
@@ -424,15 +431,11 @@ function App() {
   const askBackupPassword = (message,confirmation=false) => {
     const first=window.prompt(message);
     if(first===null) return null;
-    if(first.length<8){
-      throw new Error("A senha do backup precisa ter pelo menos 8 caracteres.");
-    }
+    if(first.length<8) throw new Error("A senha do backup precisa ter pelo menos 8 caracteres.");
     if(confirmation){
       const second=window.prompt("Confirme a senha do backup:");
       if(second===null) return null;
-      if(second!==first){
-        throw new Error("As senhas não coincidem.");
-      }
+      if(second!==first) throw new Error("As senhas não coincidem.");
     }
     return first;
   };
@@ -452,44 +455,35 @@ function App() {
   const doExport=async()=>{
     try{
       const password=askBackupPassword(
-        "Crie uma senha para proteger seu backup.\n\nMínimo: 8 caracteres.\n\nEssa senha será necessária para importar o backup.",
-        true
+        "Crie uma senha para proteger seu backup.\n\nMínimo: 8 caracteres.\n\nEssa senha será necessária para importar o backup.",true
       );
       if(password===null) return;
 
       const backup=buildBackup();
+      const plaintextSize=textEncoder.encode(JSON.stringify(backup)).byteLength;
+      if(plaintextSize>MAX_BACKUP_BYTES) throw new Error("O backup excede o limite de 5 MB.");
       const encrypted=await encryptBackup(backup,password);
       const json=JSON.stringify(encrypted,null,2);
+      const byteSize=textEncoder.encode(json).byteLength;
+      if(byteSize>MAX_BACKUP_BYTES) throw new Error("O arquivo de backup criptografado excede o limite de 5 MB.");
       const stamp=new Date().toISOString().slice(0,10);
       const filename=`contabilidade-pj-backup-${stamp}.json`;
       const blob=new Blob([json],{type:"application/json;charset=utf-8"});
       const file=new File([blob],filename,{type:"application/json"});
 
-      if(typeof navigator!=="undefined" && navigator.share &&
-         typeof navigator.canShare==="function" &&
-         navigator.canShare({files:[file]})){
+      if(typeof navigator!=="undefined" && navigator.share && typeof navigator.canShare==="function" && navigator.canShare({files:[file]})){
         try{
-          await navigator.share({
-            title:"Backup Contabilidade PJ",
-            text:"Backup criptografado dos dados do aplicativo Contabilidade PJ.",
-            files:[file],
-          });
+          await navigator.share({title:"Backup Contabilidade PJ",text:"Backup criptografado dos dados do aplicativo Contabilidade PJ.",files:[file]});
           notify("✅ Backup criptografado gerado.","ok");
           return;
-        }catch(shareError){
-          if(shareError?.name==="AbortError") return;
-        }
+        }catch(shareError){ if(shareError?.name==="AbortError") return; }
       }
 
       const url=URL.createObjectURL(blob);
-      const a=document.createElement("a");
-      a.href=url;
-      a.download=filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      const a=document.createElement("a"); a.href=url; a.download=filename;
+      document.body.appendChild(a); a.click(); a.remove();
       setTimeout(()=>URL.revokeObjectURL(url),1000);
-      notify(`✅ Backup criptografado ${filename} gerado.`,"ok");
+      notify(`✅ Backup criptografado ${filename} gerado.` ,"ok");
     }catch(e){
       if(e?.name==="AbortError") return;
       notify(e?.message||"Não foi possível gerar o backup criptografado.","err");
@@ -498,70 +492,54 @@ function App() {
 
   const restoreBackup=async(text)=>{
     try{
+      if(typeof text!=="string") throw new Error("Arquivo de backup inválido.");
+      const byteLength=textEncoder.encode(text).byteLength;
+      if(byteLength>MAX_BACKUP_BYTES) throw new Error("O arquivo de backup excede o limite de 5 MB.");
+      if(!text.trim()) throw new Error("O arquivo está vazio.");
+
       let parsed;
-      try{
-        parsed=JSON.parse(text);
-      }catch{
-        throw new Error("O arquivo selecionado não é um JSON válido.");
-      }
+      try{ parsed=JSON.parse(text); }
+      catch{ throw new Error("O arquivo selecionado não é um JSON válido."); }
 
       let backupData;
-
       if(parsed?.format==="contabilidade-pj-encrypted-backup"){
-        const password=askBackupPassword(
-          "Digite a senha usada para proteger este backup:"
-        );
+        const password=askBackupPassword("Digite a senha usada para proteger este backup:");
         if(password===null) return;
-
         backupData=await decryptBackup(parsed,password);
       }else{
-        /*
-         * Compatibilidade com backups antigos sem criptografia.
-         * Novos backups são sempre criptografados.
-         */
-        const useLegacy=window.confirm(
-          "Este é um backup antigo sem criptografia.\n\nDeseja importá-lo mesmo assim?"
-        );
+        const useLegacy=window.confirm("Este é um backup antigo sem criptografia.\n\nDeseja importá-lo mesmo assim?");
         if(!useLegacy) return;
         backupData=parsed;
       }
 
-      // Valida e normaliza TODO o backup antes de qualquer gravação.
+      // Strict validation happens before any write, including type checks,
+      // version/schema checks, unknown-field checks and collection limits.
       const d=normalizeBackup(backupData);
-      const {
-        txs:txData,
-        favs:favData,
-        plMap:plData,
-        plManual:manualData,
-        ctbMap:ctbData,
-        irrfMap:irrfData
-      }=d;
+      const {txs:txData,favs:favData,plMap:plData,plManual:manualData,ctbMap:ctbData,irrfMap:irrfData}=d;
+      const up=await cascadePL(txData,manualData);
 
-      await saveFavs(favData);
-      await saveCtb(ctbData);
-      await sSet("pj_irrf",irrfData);
-      await sSet("pj_plm",manualData);
-      await sSet("pj_pl",plData);
-      await sSet("pj_tx2",txData);
+      // One storage transaction replaces the complete application state.
+      // No individual backup field is persisted before this point.
+      await replaceState({
+        pj_tx2:txData,
+        pj_favs2:favData,
+        pj_pl:up,
+        pj_plm:manualData,
+        pj_ctb:ctbData,
+        pj_irrf:irrfData,
+      });
 
       setFavs(favData);
       setCtbMap(ctbData);
       setIrrfMap(irrfData);
       setPlManual(manualData);
-
-      const up=await cascadePL(txData,manualData);
       setTxs(txData);
       setPlMap(up);
-      await sSet("pj_pl",up);
 
       setShowSettings(false);
       notify("✅ Backup importado e validado com sucesso!","ok");
     }catch(e){
-      notify(
-        e?.message ||
-        "Arquivo de backup inválido, senha incorreta ou incompatível.",
-        "err"
-      );
+      notify(e?.message||"Arquivo de backup inválido, senha incorreta ou incompatível.","err");
     }
   };
 
@@ -571,23 +549,13 @@ function App() {
     if(!file) return;
 
     try{
-      if(file.size>25*1024*1024){
-        throw new Error("O arquivo de backup excede o limite de 25 MB.");
-      }
-
-      if(!/\.json$/i.test(file.name)){
-        throw new Error("Selecione um arquivo de backup .json.");
-      }
-
+      if(file.size>MAX_BACKUP_BYTES) throw new Error("O arquivo de backup excede o limite de 5 MB.");
+      if(!/\.json$/i.test(file.name)) throw new Error("Selecione um arquivo de backup .json.");
       const text=await file.text();
-      if(!text.trim()) throw new Error("O arquivo está vazio.");
+      if(new TextEncoder().encode(text).byteLength>MAX_BACKUP_BYTES) throw new Error("O arquivo de backup excede o limite de 5 MB.");
       await restoreBackup(text);
     }catch(e){
-      notify(
-        e?.message ||
-        "Não foi possível ler o arquivo de backup.",
-        "err"
-      );
+      notify(e?.message||"Não foi possível ler o arquivo de backup.","err");
     }
   };
 
