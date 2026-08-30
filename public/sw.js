@@ -1,5 +1,5 @@
 /*
- * Service Worker — Lote O / versão 11
+ * Service Worker — Lote O / versão 12
  *
  * Objetivos:
  * - permitir reabertura real do PWA sem rede depois de um carregamento online;
@@ -9,7 +9,7 @@
  * - usar nomes de cache versionados para evitar mistura entre builds.
  */
 
-const CACHE_NAME = 'contabilidade-pj-v11';
+const CACHE_NAME = 'contabilidade-pj-v12';
 
 const APP_SHELL = [
   '/',
@@ -71,6 +71,16 @@ self.addEventListener('activate', (event) => {
       .then(() => self.clients.claim()),
   );
 });
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type !== 'CLEAR_CACHES') return
+
+  event.waitUntil(
+    caches
+      .keys()
+      .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
+  )
+})
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
