@@ -10,7 +10,7 @@ const manifest = JSON.parse(
 
 describe('PWA / Lote O', () => {
   it('mantém cache versionado e limpa apenas caches antigos do próprio app', () => {
-    expect(serviceWorker).toContain("const CACHE_NAME = 'contabilidade-pj-v11'")
+    expect(serviceWorker).toContain("const CACHE_NAME = 'contabilidade-pj-v12'")
     expect(serviceWorker).toContain("key.startsWith('contabilidade-pj-')")
     expect(serviceWorker).toContain("key !== CACHE_NAME")
   })
