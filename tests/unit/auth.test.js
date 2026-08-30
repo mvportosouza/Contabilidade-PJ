@@ -11,6 +11,9 @@ const { mockSupabase } = vi.hoisted(() => ({
       updateUser: vi.fn(),
       signOut: vi.fn(),
     },
+    functions: {
+      invoke: vi.fn(),
+    },
   },
 }))
 
@@ -48,6 +51,11 @@ describe('Auth QA — Lote Q', () => {
     })
 
     mockSupabase.auth.signOut.mockResolvedValue({
+      error: null,
+    })
+
+    mockSupabase.functions.invoke.mockResolvedValue({
+      data: { ok: true },
       error: null,
     })
 
@@ -171,6 +179,32 @@ describe('Auth QA — Lote Q', () => {
     await auth.signOut()
 
     expect(mockSupabase.auth.signOut).toHaveBeenCalledTimes(1)
+  })
+
+  it('exclui a conta exclusivamente pela Edge Function autenticada', async () => {
+    mockSupabase.auth.getSession.mockResolvedValue({
+      data: {
+        session: { user: { id: 'user-1' } },
+      },
+      error: null,
+    })
+
+    const auth = await import('../../lib/auth')
+
+    await auth.deleteAccount()
+
+    expect(mockSupabase.functions.invoke).toHaveBeenCalledWith('delete-account')
+    expect(mockSupabase.auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
+  })
+
+  it('não tenta excluir a conta sem uma sessão autenticada', async () => {
+    const auth = await import('../../lib/auth')
+
+    await expect(auth.deleteAccount()).rejects.toThrow(
+      'Sessão indisponível para excluir a conta.',
+    )
+
+    expect(mockSupabase.functions.invoke).not.toHaveBeenCalled()
   })
 
   it('rejeita senha com menos de 8 caracteres antes de chamar o Supabase', async () => {
