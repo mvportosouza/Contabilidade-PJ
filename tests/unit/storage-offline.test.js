@@ -164,6 +164,11 @@ describe('restore transacional', () => {
   })
 
   it('substitui o estado inteiro em uma única operação quando offline', async () => {
+    // Seed the previous state with a successful cloud commit. The actual
+    // restore below is performed offline and must therefore be local/queued.
+    mockSupabase.rpc.mockResolvedValueOnce({
+      data: { status: 'saved', updated_at: RPC_UPDATED_AT }, error: null,
+    })
     const storage = await import('../../lib/storage')
     const original = {
       pj_tx2: [{ id: 'old', tipo: 'receita', valor: 10, data: '2026-08-30' }],
