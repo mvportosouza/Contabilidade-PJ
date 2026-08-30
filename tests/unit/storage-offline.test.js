@@ -151,3 +151,84 @@ describe('persistência offline', () => {
     expect(storage.getStorageStatus().state).toBe('synced')
   })
 })
+
+describe('restore transacional', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.clearAllMocks()
+    setupBrowserEnvironment()
+    Object.defineProperty(globalThis.navigator, 'onLine', { configurable: true, value: true })
+    mockSupabase.auth.getSession.mockResolvedValue({
+      data: { session: { user: { id: USER_ID } } }, error: null,
+    })
+  })
+
+  it('substitui o estado inteiro em uma única operação quando offline', async () => {
+    const storage = await import('../../lib/storage')
+    const original = {
+      pj_tx2: [{ id: 'old', tipo: 'receita', valor: 10, data: '2026-08-30' }],
+      pj_favs2: [], pj_pl: {}, pj_plm: {}, pj_ctb: {}, pj_irrf: {},
+    }
+    await storage.replaceState(original)
+
+    Object.defineProperty(globalThis.navigator, 'onLine', { configurable: true, value: false })
+    const next = {
+      pj_tx2: [{ id: 'new', tipo: 'despesa', valor: 20, data: '2026-08-30' }],
+      pj_favs2: [{ id: 'fav', tipo: 'despesa', nome: 'Fornecedor' }],
+      pj_pl: { '2026-08': 5000 }, pj_plm: {}, pj_ctb: {}, pj_irrf: {},
+    }
+
+    await storage.replaceState(next)
+    expect(await storage.sGet('pj_tx2')).toEqual(next.pj_tx2)
+    expect(await storage.sGet('pj_favs2')).toEqual(next.pj_favs2)
+    expect(await storage.sGet('pj_pl')).toEqual(next.pj_pl)
+    expect(JSON.parse(localStorage.getItem(`pj_app_state_cache_v3_${USER_ID}`)).state).toEqual(next)
+  })
+
+  it('preserva o estado anterior quando a gravação remota falha', async () => {
+    mockSupabase.rpc.mockResolvedValueOnce({
+      data: { status: 'saved', updated_at: RPC_UPDATED_AT }, error: null,
+    })
+    const storage = await import('../../lib/storage')
+    const original = {
+      pj_tx2: [{ id: 'old', tipo: 'receita', valor: 10, data: '2026-08-30' }],
+      pj_favs2: [], pj_pl: {}, pj_plm: {}, pj_ctb: {}, pj_irrf: {},
+    }
+    await storage.replaceState(original)
+
+    mockSupabase.rpc.mockRejectedValueOnce(new Error('network'))
+    const next = {
+      pj_tx2: [{ id: 'new', tipo: 'despesa', valor: 20, data: '2026-08-30' }],
+      pj_favs2: [], pj_pl: {}, pj_plm: {}, pj_ctb: {}, pj_irrf: {},
+    }
+
+    await expect(storage.replaceState(next)).rejects.toThrow(/restore|aplicar/i)
+    expect(await storage.sGet('pj_tx2')).toEqual(original.pj_tx2)
+    expect(JSON.parse(localStorage.getItem(`pj_app_state_cache_v3_${USER_ID}`)).state).toEqual(original)
+  })
+})
+
+
+describe('restore repetido', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.clearAllMocks()
+    setupBrowserEnvironment()
+    Object.defineProperty(globalThis.navigator, 'onLine', { configurable: true, value: false })
+    mockSupabase.auth.getSession.mockResolvedValue({
+      data: { session: { user: { id: USER_ID } } }, error: null,
+    })
+  })
+
+  it('é idempotente ao restaurar o mesmo estado novamente', async () => {
+    const storage = await import('../../lib/storage')
+    const state = {
+      pj_tx2: [{ id: 'same', tipo: 'receita', valor: 100, data: '2026-08-30' }],
+      pj_favs2: [], pj_pl: {}, pj_plm: {}, pj_ctb: {}, pj_irrf: {},
+    }
+    await storage.replaceState(state)
+    await storage.replaceState(state)
+    expect(await storage.sGet('pj_tx2')).toEqual(state.pj_tx2)
+    expect(JSON.parse(localStorage.getItem(`pj_app_state_cache_v3_${USER_ID}`)).state).toEqual(state)
+  })
+})
