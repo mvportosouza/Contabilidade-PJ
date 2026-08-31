@@ -15,7 +15,7 @@ export function LancTab({monthTxs,receitas,despesas,resultado,month,year,MONTHS,
           <p style={{margin:"5px 0 0",fontSize:20,fontWeight:"bold",color:C.gold}}>{fmtBRL(dividendSummary?.total||0)}</p>
         </div>
         <div style={{textAlign:"right"}}>
-          <p style={{margin:0,fontSize:11,color:(dividendSummary?.irrf||0)>0?C.red:C.navyMid,fontWeight:"700"}}>{fmtBRL(dividendSummary?.irrf||0)} IRRF</p>
+          <p style={{margin:0,fontSize:11,color:(dividendSummary?.irrf||0)>0?C.red:C.navyMid,fontWeight:"700"}}>{fmtBRL(dividendSummary?.irrf||0)} IRRF PJ</p>
           <p style={{margin:"3px 0 0",fontSize:10,color:C.muted}}>{fmtBRL(Math.max(0,50000-(dividendSummary?.taxableTotal||0)))} até o limite</p>
         </div>
       </div>

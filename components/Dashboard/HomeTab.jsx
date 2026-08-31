@@ -26,7 +26,7 @@ export function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,M
         <div style={{minWidth:0}}>
           <p style={{margin:0,fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase"}}>Obrigações do mês</p>
           <p style={{margin:"6px 0 0",fontSize:26,fontWeight:"bold",color:C.navyMid,letterSpacing:-0.7}}>{fmtBRL(totalObrig)}</p>
-          <p style={{margin:"5px 0 0",fontSize:11,color:C.muted,lineHeight:1.45}}>DAS + INSS + IRRF + Contabilidade</p>
+          <p style={{margin:"5px 0 0",fontSize:11,color:C.muted,lineHeight:1.45}}>DAS + INSS + IRRF PF + Contabilidade</p>
         </div>
         <button onClick={openTaxation} style={{background:"none",border:"none",padding:0,marginTop:10,color:C.navyMid,fontFamily:"inherit",fontSize:13,fontWeight:"700",cursor:"pointer",whiteSpace:"nowrap"}}>Ver Tributação ›</button>
       </div>
@@ -73,7 +73,7 @@ export function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,M
           <p style={{margin:"4px 0 0",fontSize:10,color:C.muted}}>limite mensal por PJ + beneficiário</p>
         </div>
       </div>
-      {(dividendSummary?.irrf||0)>0 && <div style={{marginTop:10,background:C.redLight,borderRadius:10,padding:"9px 11px",fontSize:11,color:C.red,fontWeight:"700"}}>🔴 IRRF estimado: {fmtBRL(dividendSummary.irrf)} · 10% sobre a distribuição sujeita à regra.</div>}
+      {(dividendSummary?.irrf||0)>0 && <div style={{marginTop:10,background:C.redLight,borderRadius:10,padding:"9px 11px",fontSize:11,color:C.red,fontWeight:"700"}}>🔴 IRRF PJ estimado: {fmtBRL(dividendSummary.irrf)} · 10% sobre a distribuição sujeita à regra.</div>}
       {(dividendSummary?.groups||[]).some(g=>g.status==="proximo"||g.status==="limite") && <div style={{marginTop:10,background:"#FFF8F0",borderRadius:10,padding:"9px 11px",fontSize:11,color:"#9A6500",fontWeight:"700"}}>⚠️ Há distribuição próxima do limite mensal de R$ 50.000,00.</div>}
     </Card>
     <Card style={{marginBottom:12}}>

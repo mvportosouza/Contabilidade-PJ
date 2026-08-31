@@ -44,7 +44,7 @@ export function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributaca
     {label:"Impostos pagos",key:"impostos",color:"#C0392B",format:"money",clickTax:true},
     {label:"Pró-labore",key:"pl",color:C.gold,format:"money"},
     {label:"INSS",key:"inss",color:"#8E44AD",format:"money"},
-    {label:"IRRF",key:"irrf",color:"#C0392B",format:"money"},
+    {label:"IRRF PF",key:"irrf",color:"#C0392B",format:"money"},
     {label:"Distribuição de lucros",key:"distribuicao",color:"#B8860B",format:"money"},
     {label:"Margem líquida",key:"margem",color:C.navyMid,format:"percent"},
     {label:"Receita média mensal",key:"mediaReceitaAcumulada",color:"#5D6D7E",format:"money"},
@@ -130,7 +130,7 @@ export function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributaca
         </ResponsiveContainer>
         {ch.key==="melhorMes" && <p style={{margin:"8px 0 0",fontSize:11,color:C.muted}}>Melhor mês: <strong>{best?.mes || "—"}</strong>{best ? ` · ${fmtBRL(best.lucro)}` : ""}</p>}
         {ch.key==="piorMes" && <p style={{margin:"8px 0 0",fontSize:11,color:C.muted}}>Pior mês: <strong>{worst?.mes || "—"}</strong>{worst ? ` · ${fmtBRL(worst.lucro)}` : ""}</p>}
-        {ch.clickTax && <p style={{margin:"8px 0 0",fontSize:10,color:"#AAA"}}>Toque em uma barra para ver DAS + INSS + IRRF.</p>}
+        {ch.clickTax && <p style={{margin:"8px 0 0",fontSize:10,color:"#AAA"}}>Toque em uma barra para ver DAS + INSS + IRRF PF.</p>}
       </div>
     );
   };
@@ -178,7 +178,7 @@ export function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributaca
         {[
           ["DAS",taxDetail.das],
           ["INSS",taxDetail.inss],
-          ["IRRF",taxDetail.irrf],
+          ["IRRF PF",taxDetail.irrf],
         ].map(([label,value])=>(
           <div key={label} style={{display:"flex",justifyContent:"space-between",padding:"12px 0",borderBottom:`1px solid ${C.border}`}}>
             <span style={{fontSize:14,color:C.text,fontWeight:"600"}}>{label}</span>
