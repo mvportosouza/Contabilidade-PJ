@@ -63,4 +63,26 @@ describe('tributação mínima de altas rendas — 2026', () => {
   it('usa a tabela anual de 2026 para a estimativa do IRPF regular', () => {
     expect(annualProgressiveTax(100000)).toBeCloseTo(16595.34, 2)
   })
+
+  it('inclui outros rendimentos na base relevante quando a opção estiver marcada', () => {
+    const result = calculateHighIncomeEstimate({
+      transactions: [],
+      plMap: {},
+      year: 2026,
+      otherIncome: {
+        descricao: 'Teste',
+        valor: 650000,
+        incluirBase: true,
+        tributavel: true,
+        irrf: 0,
+        irrfExclusive: 0,
+      },
+      calcINSS: inss,
+    })
+    expect(result.annualIncome).toBe(650000)
+    expect(result.minimumBase).toBe(650000)
+    expect(result.rate).toBeCloseTo(0.008333333333333333, 12)
+    expect(result.minimumTax).toBeCloseTo(5416.666666666667, 6)
+  })
+
 })
