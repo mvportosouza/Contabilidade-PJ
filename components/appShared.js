@@ -165,7 +165,7 @@ function getPreviousMonthPayables({txs, effectivePlMap, ctbMap, irrfMap, year, m
 
   const items = [
     due(20, "DAS", taxation?.das || 0),
-    due(20, "DARF (INSS + IRRF)", inss + irrf),
+    due(20, "DARF (INSS + IRRF PF)", inss + irrf),
     due(15, "Contabilidade", ctb),
   ];
 

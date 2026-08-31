@@ -952,7 +952,7 @@ function App() {
             <Div/>
             <div style={{paddingBottom:14}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
-                <div><p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>IRRF</p><p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>Tabela progressiva 2026 · base: pró-labore − INSS</p></div>
+                <div><p style={{margin:0,fontSize:13,fontWeight:"600",color:C.text}}>IRRF PF</p><p style={{margin:"2px 0 0",fontSize:11,color:C.muted}}>Tabela progressiva 2026 · base: pró-labore − INSS</p></div>
                 <p style={{margin:0,fontSize:14,fontWeight:"bold",color:"#C0392B"}}>{fmtMoney(IRRFef)}</p>
               </div>
               <MoneyIn value={irrfIn||fmtIn(String(Math.round(IRRFef*100)))} onChange={setIrrfIn} onBlur={commitIrrf} placeholder={fmtIn(String(Math.round(IRRFauto*100)))}/>
