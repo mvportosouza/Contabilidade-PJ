@@ -40,6 +40,7 @@ function App() {
   const [plManual,setPlManual]=useState({});
   const [ctbMap,setCtbMap]=useState({});
   const [irrfMap,setIrrfMap]=useState({});
+  const [pfOtherIncomeMap,setPfOtherIncomeMap]=useState({});
   const [plIn,setPlIn]=useState("");
   const [ctbIn,setCtbIn]=useState("");
   const [irrfIn,setIrrfIn]=useState("");
@@ -76,6 +77,7 @@ function App() {
       }
       const ct=await sGet("pj_ctb")||{};
       const storedIrrf=await sGet("pj_irrf")||{};
+      const pfOther=await sGet("pj_pf_outros")||{};
       // IRRF manual só existe quando há um valor efetivamente informado.
       // Zeros antigos não podem sobrescrever o cálculo automático de 2026.
       const irrf=Object.fromEntries(
@@ -93,7 +95,7 @@ function App() {
       if (t.length > 0 && JSON.stringify(seededPL) !== JSON.stringify(pm)) {
         await sSet("pj_plm", seededPL);
       }
-      setFavs(fv); setCtbMap(ct); setIrrfMap(irrf); setPlManual(seededPL);
+      setFavs(fv); setCtbMap(ct); setIrrfMap(irrf); setPfOtherIncomeMap(pfOther); setPlManual(seededPL);
       const updated=await cascadePL(t,seededPL);
       setTxs(t); setPlMap(updated);
        hydratedRef.current = true;
@@ -191,6 +193,7 @@ function App() {
     ...Object.keys(ACCOUNTING_PL_BY_MONTH).map(k => Number(String(k).slice(0, 4))).filter(Number.isFinite),
     ...Object.keys(ctbMap || {}).map(k => Number(String(k).slice(0, 4))).filter(Number.isFinite),
     ...Object.keys(irrfMap || {}).map(k => Number(String(k).slice(0, 4))).filter(Number.isFinite),
+    ...Object.keys(pfOtherIncomeMap || {}).map(k => Number(k)).filter(Number.isFinite),
   ])].sort((a, b) => b - a);
 
   /* ── Savers ── */
@@ -204,6 +207,7 @@ function App() {
   const saveFavs=async d=>{const sorted=sortFavorites(d);setFavs(sorted);await sSet("pj_favs2",sorted);};
   const saveCtb=async d=>{setCtbMap(d);await sSet("pj_ctb",d);};
   const saveIrrf=async d=>{setIrrfMap(d);await sSet("pj_irrf",d);};
+  const savePfOtherIncome=async d=>{setPfOtherIncomeMap(d);await sSet("pj_pf_outros",d);};
   const commitIrrf=async()=>{
     const v=parseBRL(irrfIn);
     const next={...irrfMap};
@@ -473,6 +477,7 @@ function App() {
     plManual,
     ctbMap,
     irrfMap,
+    pfOtherIncomeMap,
     exportedAt:new Date().toISOString(),
   });
 
@@ -539,7 +544,7 @@ function App() {
       // Strict validation happens before any write, including type checks,
       // version/schema checks, unknown-field checks and collection limits.
       const d=normalizeBackup(backupData);
-      const {txs:txData,favs:favData,plMap:plData,plManual:manualData,ctbMap:ctbData,irrfMap:irrfData}=d;
+      const {txs:txData,favs:favData,plMap:plData,plManual:manualData,ctbMap:ctbData,irrfMap:irrfData,pfOtherIncomeMap:pfOtherData}=d;
       const up=await cascadePL(txData,manualData);
 
       // One storage transaction replaces the complete application state.
@@ -551,11 +556,13 @@ function App() {
         pj_plm:manualData,
         pj_ctb:ctbData,
         pj_irrf:irrfData,
+        pj_pf_outros:pfOtherData,
       });
 
       setFavs(favData);
       setCtbMap(ctbData);
       setIrrfMap(irrfData);
+      setPfOtherIncomeMap(pfOtherData);
       setPlManual(manualData);
       setTxs(txData);
       setPlMap(up);
@@ -655,7 +662,7 @@ function App() {
 
         {/* ── ESTATÍSTICA ── */}
         {tab==="anual" && (
-          <AnualTab txs={txs} plMap={effectivePlMap} irrfMap={irrfMap} year={year} C={C} fmtBRL={fmtMoney} calcIRRF={calcIRRF} calcTributacao={calcTributacao}/>
+          <AnualTab txs={txs} plMap={effectivePlMap} irrfMap={irrfMap} year={year} C={C} fmtBRL={fmtMoney} calcIRRF={calcIRRF} calcTributacao={calcTributacao} calcINSS={calcINSS} pfOtherIncomeMap={pfOtherIncomeMap} savePfOtherIncome={savePfOtherIncome}/>
         )}
 
         {tab==="estatistica" && (
