@@ -23,7 +23,7 @@ export function TxCard({tx,onEdit,onDelete,C,fmtBRL,MONTHS}){
           {isD&&<div style={{marginTop:4,fontSize:10,color:C.muted}}>
             {tx.beneficiarioCpf?`CPF ${tx.beneficiarioCpf}`:"CPF não informado"} · {tx.origemLucro==="anteriores_2025"?"Lucro anterior a 2026":"Lucro apurado em 2026"}
           </div>} 
-          {isD&&Number(tx.irrfDistribuicao)>0&&<div style={{marginTop:3,fontSize:10,color:C.red,fontWeight:"700"}}>IRRF {fmtBRL(tx.irrfDistribuicao)} · Líquido {fmtBRL(tx.valorLiquidoDistribuicao)}</div>}
+          {isD&&Number(tx.irrfDistribuicao)>0&&<div style={{marginTop:3,fontSize:10,color:C.red,fontWeight:"700"}}>IRRF PJ {fmtBRL(tx.irrfDistribuicao)} · Líquido {fmtBRL(tx.valorLiquidoDistribuicao)}</div>}
         </div>
         <div style={{textAlign:"right",flexShrink:0}}>
           <p style={{margin:0,fontSize:15,fontWeight:"bold",color:txColor}}>{isR?"+":isD?"":"-"}{fmtBRL(tx.valor)}</p>
