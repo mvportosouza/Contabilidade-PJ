@@ -15,12 +15,60 @@ import {
 } from "recharts";
 import { Modal, Card, SmLabel, CloseBtn } from "../AppUI";
 import { ReportButton } from "../Reports/ReportButton";
+import { calculateHighIncomeEstimate } from "../../lib/highIncome";
 
-export function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributacao}){
+export function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributacao,calcINSS,pfOtherIncomeMap,savePfOtherIncome}){
   const MS=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
   const [taxDetail,setTaxDetail]=useState(null);
+  const [otherModal,setOtherModal]=useState(false);
+  const [otherDraft,setOtherDraft]=useState({descricao:"",valor:"",irrf:"",irrfExclusive:"",incluirBase:true,tributavel:true});
   const data=getAnnualStatistics(txs,plMap,irrfMap,year,calcIRRF,calcTributacao)
     .map((row,i)=>({...row,mes:MS[i]}));
+
+  const otherKey=String(year);
+  const otherIncome=pfOtherIncomeMap?.[otherKey] || {descricao:"",valor:0,irrf:0,irrfExclusive:0,incluirBase:true,tributavel:true};
+  const annualIrrfPf=Array.from({length:12},(_,i)=>{
+    const key=`${year}-${String(i+1).padStart(2,"0")}`;
+    const pl=Number(plMap?.[key]||0);
+    const inss=typeof calcINSS==="function"?calcINSS(pl):pl*0.11;
+    return Object.prototype.hasOwnProperty.call(irrfMap||{},key) && Number(irrfMap[key])>0
+      ? Number(irrfMap[key])
+      : (typeof calcIRRF==="function" ? Number(calcIRRF(pl,{inss})?.valor||0) : 0);
+  }).reduce((sum,v)=>sum+Math.max(0,v),0);
+
+  const highIncome=calculateHighIncomeEstimate({
+    transactions:txs,
+    plMap,
+    year,
+    otherIncome,
+    calcINSS,
+    irrfPf:annualIrrfPf,
+  });
+
+  const openOtherModal=()=>{
+    setOtherDraft({
+      descricao:otherIncome.descricao||"",
+      valor:otherIncome.valor?String(Math.round(Number(otherIncome.valor)*100)/100).replace(".",","):"",
+      irrf:otherIncome.irrf?String(Math.round(Number(otherIncome.irrf)*100)/100).replace(".",","):"",
+      irrfExclusive:otherIncome.irrfExclusive?String(Math.round(Number(otherIncome.irrfExclusive)*100)/100).replace(".",","):"",
+      incluirBase:otherIncome.incluirBase!==false,
+      tributavel:otherIncome.tributavel!==false,
+    });
+    setOtherModal(true);
+  };
+  const parseMoney=v=>Number(String(v||"").replace(/\./g,"").replace(",","."))||0;
+  const saveOther=async()=>{
+    const next={...pfOtherIncomeMap,[otherKey]:{
+      descricao:String(otherDraft.descricao||"").trim(),
+      valor:parseMoney(otherDraft.valor),
+      irrf:parseMoney(otherDraft.irrf),
+      irrfExclusive:parseMoney(otherDraft.irrfExclusive),
+      incluirBase:Boolean(otherDraft.incluirBase),
+      tributavel:Boolean(otherDraft.tributavel),
+    }};
+    await savePfOtherIncome(next);
+    setOtherModal(false);
+  };
 
   const fmtK=v=>v>=1000?`R$${(v/1000).toFixed(1)}k`:`R$${v.toFixed(0)}`;
   const pct=v=>`${Number(v||0).toFixed(1)}%`;
@@ -140,6 +188,53 @@ export function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributaca
   return(<>
     <ReportButton onGenerate={() => generateAnnualReportPdf({ year, rows: data })} />
     <p style={{margin:"0 0 14px",fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase"}}>Dados Anuais · {year}</p>
+
+    {year===2026 && <div style={{background:"white",borderRadius:18,padding:"18px",marginBottom:14,boxShadow:"0 2px 16px rgba(0,0,0,0.06)",border:`1px solid ${highIncome.status==="sujeito"?"#F0C7C1":C.border}`}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:14}}>
+        <div>
+          <p style={{margin:0,fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase"}}>Alta Renda · IRPF {year}</p>
+          <p style={{margin:"5px 0 0",fontSize:22,fontWeight:"bold",color:C.navyMid}}>{fmtBRL(highIncome.annualIncome)}</p>
+          <p style={{margin:"3px 0 0",fontSize:10,color:C.muted}}>Renda anual consolidada da pessoa física</p>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <p style={{margin:0,fontSize:11,fontWeight:"bold",color:highIncome.status==="sujeito"?C.red:highIncome.status==="proximo"?"#B87916":"#2E7D32"}}>
+            {highIncome.status==="sujeito"?"🔴 Tributação mínima estimada":highIncome.status==="compensado"?"🟢 Sem diferença estimada":highIncome.status==="proximo"?"⚠️ Próximo de R$ 600 mil":"✅ Abaixo de R$ 600 mil"}
+          </p>
+          <p style={{margin:"4px 0 0",fontSize:10,color:C.muted}}>Limite: R$ 600.000</p>
+        </div>
+      </div>
+
+      <div style={{background:C.navyLight,borderRadius:13,padding:"12px 13px",marginBottom:10}}>
+        {[
+          ["Renda anual",highIncome.annualIncome,C.navyMid],
+          ["Base relevante",highIncome.minimumBase,C.gold],
+          ["IRPF regular estimado",highIncome.regularIrpf,C.navyMid],
+          ["IRRF PF",highIncome.irrfPf,C.red],
+          ["IRRF PJ",highIncome.irrfPj,C.red],
+          ["IRRF outros",highIncome.otherIrrf,C.red],
+          ["INSS",highIncome.inss,"#8E44AD"],
+          ["Tributação mínima estimada",highIncome.minimumTax,highIncome.minimumTax>0?C.red:"#2E7D32"],
+          ["Diferença estimada",highIncome.difference,highIncome.difference>0?C.red:"#2E7D32"],
+        ].map(([label,value,color],i)=>(
+          <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:i<8?`1px solid rgba(224,216,206,0.65)`:"none"}}>
+            <span style={{fontSize:11,color:C.text}}>{label}</span>
+            <strong style={{fontSize:12,color}}>{fmtBRL(value)}</strong>
+          </div>
+        ))}
+      </div>
+
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0 2px"}}>
+        <div>
+          <p style={{margin:0,fontSize:11,color:C.text,fontWeight:"600"}}>Outros rendimentos PF</p>
+          <p style={{margin:"2px 0 0",fontSize:10,color:C.muted}}>{otherIncome.valor?`${otherIncome.descricao||"Informado manualmente"} · ${fmtBRL(otherIncome.valor)}`:"Nenhum informado"}</p>
+        </div>
+        <button onClick={openOtherModal} style={{background:C.navyLight,border:`1px solid ${C.border}`,borderRadius:10,padding:"7px 10px",color:C.navyMid,fontSize:11,fontFamily:"inherit",fontWeight:"600",cursor:"pointer"}}>Editar</button>
+      </div>
+
+      {highIncome.status==="sujeito" && <div style={{background:C.redLight,borderRadius:11,padding:"9px 11px",marginTop:10,fontSize:10,color:C.red,lineHeight:1.45}}>A estimativa indica possível diferença de tributação mínima após as compensações consideradas. Revise os rendimentos e retenções antes da DIRPF.</div>}
+      {highIncome.status==="proximo" && <div style={{background:"#FFF8E8",borderRadius:11,padding:"9px 11px",marginTop:10,fontSize:10,color:"#8A641F",lineHeight:1.45}}>Faltam {fmtBRL(highIncome.thresholdRemaining)} para alcançar R$ 600.000 no cenário informado.</div>}
+      <p style={{margin:"10px 0 0",fontSize:9,color:"#999",lineHeight:1.45}}>Este cálculo é uma estimativa gerencial e não substitui o cálculo oficial do IRPF.</p>
+    </div>}
     {charts.map(renderChart)}
     <div style={{background:"white",borderRadius:18,padding:"18px",marginBottom:12,boxShadow:"0 2px 16px rgba(0,0,0,0.06)"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
@@ -165,6 +260,26 @@ export function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributaca
          </ComposedChart>
        </ResponsiveContainer>
      </div>
+
+    {otherModal && (
+      <Modal onClose={()=>setOtherModal(false)}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div><SmLabel>Outros rendimentos PF · {year}</SmLabel><p style={{margin:"4px 0 0",fontSize:12,color:C.muted}}>Informe apenas rendimentos pessoais relevantes para o planejamento anual.</p></div>
+          <CloseBtn onClick={()=>setOtherModal(false)}/>
+        </div>
+        <label style={{display:"block",fontSize:11,color:C.muted,marginBottom:6}}>Descrição</label>
+        <input value={otherDraft.descricao} onChange={e=>setOtherDraft(d=>({...d,descricao:e.target.value}))} placeholder="Ex.: aluguel, juros, exterior..." style={{width:"100%",boxSizing:"border-box",background:"white",border:`1px solid ${C.border}`,borderRadius:12,padding:"12px 14px",fontSize:14,fontFamily:"inherit",marginBottom:12}}/>
+        <label style={{display:"block",fontSize:11,color:C.muted,marginBottom:6}}>Valor anual</label>
+        <input value={otherDraft.valor} onChange={e=>setOtherDraft(d=>({...d,valor:e.target.value}))} placeholder="0,00" inputMode="decimal" style={{width:"100%",boxSizing:"border-box",background:"white",border:`1px solid ${C.border}`,borderRadius:12,padding:"12px 14px",fontSize:14,fontFamily:"inherit",marginBottom:12}}/>
+        <label style={{display:"block",fontSize:11,color:C.muted,marginBottom:6}}>IRRF já retido · informativo</label>
+        <input value={otherDraft.irrf} onChange={e=>setOtherDraft(d=>({...d,irrf:e.target.value}))} placeholder="0,00" inputMode="decimal" style={{width:"100%",boxSizing:"border-box",background:"white",border:`1px solid ${C.border}`,borderRadius:12,padding:"12px 14px",fontSize:14,fontFamily:"inherit",marginBottom:12}}/>
+        <label style={{display:"block",fontSize:11,color:C.muted,marginBottom:6}}>IRRF exclusivo compensável na mínima</label>
+        <input value={otherDraft.irrfExclusive} onChange={e=>setOtherDraft(d=>({...d,irrfExclusive:e.target.value}))} placeholder="0,00" inputMode="decimal" style={{width:"100%",boxSizing:"border-box",background:"white",border:`1px solid ${C.border}`,borderRadius:12,padding:"12px 14px",fontSize:14,fontFamily:"inherit",marginBottom:14}}/>
+        <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:C.text,marginBottom:10,cursor:"pointer"}}><input type="checkbox" checked={otherDraft.incluirBase} onChange={e=>setOtherDraft(d=>({...d,incluirBase:e.target.checked}))}/> Incluir na base de altas rendas</label>
+        <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:C.text,marginBottom:18,cursor:"pointer"}}><input type="checkbox" checked={otherDraft.tributavel} onChange={e=>setOtherDraft(d=>({...d,tributavel:e.target.checked}))}/> Considerar como rendimento tributável no ajuste anual</label>
+        <button onClick={saveOther} style={{width:"100%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:"white",border:"none",borderRadius:14,padding:"14px",fontSize:14,fontFamily:"inherit",fontWeight:"600",cursor:"pointer"}}>Salvar</button>
+      </Modal>
+    )}
 
     {taxDetail && (
       <Modal onClose={()=>setTaxDetail(null)}>
