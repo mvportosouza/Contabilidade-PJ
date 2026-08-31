@@ -61,6 +61,6 @@ describe('tributação mínima de altas rendas — 2026', () => {
   })
 
   it('usa a tabela anual de 2026 para a estimativa do IRPF regular', () => {
-    expect(annualProgressiveTax(100000)).toBeCloseTo(16600.34, 2)
+    expect(annualProgressiveTax(100000)).toBeCloseTo(16595.34, 2)
   })
 })

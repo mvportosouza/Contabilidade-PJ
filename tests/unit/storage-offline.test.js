@@ -172,7 +172,7 @@ describe('restore transacional', () => {
     const storage = await import('../../lib/storage')
     const original = {
       pj_tx2: [{ id: 'old', tipo: 'receita', valor: 10, data: '2026-08-30' }],
-      pj_favs2: [], pj_pl: {}, pj_plm: {}, pj_ctb: {}, pj_irrf: {},
+      pj_favs2: [], pj_pl: {}, pj_plm: {}, pj_ctb: {}, pj_irrf: {}, pj_pf_outros: {},
     }
     await storage.replaceState(original)
 
@@ -180,7 +180,7 @@ describe('restore transacional', () => {
     const next = {
       pj_tx2: [{ id: 'new', tipo: 'despesa', valor: 20, data: '2026-08-30' }],
       pj_favs2: [{ id: 'fav', tipo: 'despesa', nome: 'Fornecedor' }],
-      pj_pl: { '2026-08': 5000 }, pj_plm: {}, pj_ctb: {}, pj_irrf: {},
+      pj_pl: { '2026-08': 5000 }, pj_plm: {}, pj_ctb: {}, pj_irrf: {}, pj_pf_outros: {},
     }
 
     await storage.replaceState(next)
@@ -197,14 +197,14 @@ describe('restore transacional', () => {
     const storage = await import('../../lib/storage')
     const original = {
       pj_tx2: [{ id: 'old', tipo: 'receita', valor: 10, data: '2026-08-30' }],
-      pj_favs2: [], pj_pl: {}, pj_plm: {}, pj_ctb: {}, pj_irrf: {},
+      pj_favs2: [], pj_pl: {}, pj_plm: {}, pj_ctb: {}, pj_irrf: {}, pj_pf_outros: {},
     }
     await storage.replaceState(original)
 
     mockSupabase.rpc.mockRejectedValueOnce(new Error('network'))
     const next = {
       pj_tx2: [{ id: 'new', tipo: 'despesa', valor: 20, data: '2026-08-30' }],
-      pj_favs2: [], pj_pl: {}, pj_plm: {}, pj_ctb: {}, pj_irrf: {},
+      pj_favs2: [], pj_pl: {}, pj_plm: {}, pj_ctb: {}, pj_irrf: {}, pj_pf_outros: {},
     }
 
     await expect(storage.replaceState(next)).rejects.toThrow(/restore|aplicar/i)
@@ -229,7 +229,7 @@ describe('restore repetido', () => {
     const storage = await import('../../lib/storage')
     const state = {
       pj_tx2: [{ id: 'same', tipo: 'receita', valor: 100, data: '2026-08-30' }],
-      pj_favs2: [], pj_pl: {}, pj_plm: {}, pj_ctb: {}, pj_irrf: {},
+      pj_favs2: [], pj_pl: {}, pj_plm: {}, pj_ctb: {}, pj_irrf: {}, pj_pf_outros: {},
     }
     await storage.replaceState(state)
     await storage.replaceState(state)
