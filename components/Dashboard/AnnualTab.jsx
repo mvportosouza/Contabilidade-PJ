@@ -198,7 +198,7 @@ export function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributaca
         </div>
         <div style={{textAlign:"right"}}>
           <p style={{margin:0,fontSize:11,fontWeight:"bold",color:highIncome.status==="sujeito"?C.red:highIncome.status==="proximo"?"#B87916":"#2E7D32"}}>
-            {highIncome.status==="sujeito"?"🔴 Tributação mínima estimada":highIncome.status==="compensado"?"🟢 Sem diferença estimada":highIncome.status==="proximo"?"⚠️ Próximo de R$ 600 mil":"✅ Abaixo de R$ 600 mil"}
+            {highIncome.status==="sujeito"?"🔴 Enquadrado — diferença estimada":highIncome.status==="compensado"?"🟢 Enquadrado — sem diferença estimada":highIncome.status==="proximo"?"⚠️ Próximo de R$ 600 mil":"✅ Abaixo de R$ 600 mil"}
           </p>
           <p style={{margin:"4px 0 0",fontSize:10,color:C.muted}}>Limite: R$ 600.000</p>
         </div>
@@ -208,6 +208,7 @@ export function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributaca
         {[
           ["Renda anual",highIncome.annualIncome,C.navyMid],
           ["Base relevante",highIncome.minimumBase,C.gold],
+          ["Alíquota mínima estimada",highIncome.rate,highIncome.rate>0?C.red:"#2E7D32","percent"],
           ["IRPF regular estimado",highIncome.regularIrpf,C.navyMid],
           ["IRRF PF",highIncome.irrfPf,C.red],
           ["IRRF PJ",highIncome.irrfPj,C.red],
@@ -216,12 +217,17 @@ export function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributaca
           ["Tributação mínima estimada",highIncome.minimumTax,highIncome.minimumTax>0?C.red:"#2E7D32"],
           ["Diferença estimada",highIncome.difference,highIncome.difference>0?C.red:"#2E7D32"],
         ].map(([label,value,color],i)=>(
-          <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:i<8?`1px solid rgba(224,216,206,0.65)`:"none"}}>
+          <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:i<9?`1px solid rgba(224,216,206,0.65)`:"none"}}>
             <span style={{fontSize:11,color:C.text}}>{label}</span>
-            <strong style={{fontSize:12,color}}>{fmtBRL(value)}</strong>
+            <strong style={{fontSize:12,color}}>{i===2 ? `${(value*100).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}%` : fmtBRL(value)}</strong>
           </div>
         ))}
       </div>
+      {highIncome.status!=="fora" && highIncome.status!=="proximo" && (
+        <p style={{margin:"0 0 6px",fontSize:9,color:C.muted,lineHeight:1.4}}>
+          Enquadramento pela regra de altas rendas: o valor acima é a estimativa gerencial do mínimo antes das compensações aplicáveis.
+        </p>
+      )}
 
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0 2px"}}>
         <div>
