@@ -13,7 +13,7 @@ import {
   Tooltip,
   Cell,
 } from "recharts";
-import { Modal, Card, SmLabel, CloseBtn } from "../AppUI";
+import { Modal, Card, SmLabel, CloseBtn, ChkBox } from "../AppUI";
 import { ReportButton } from "../Reports/ReportButton";
 import { calculateHighIncomeEstimate } from "../../lib/highIncome";
 
