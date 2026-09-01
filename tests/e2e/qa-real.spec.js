@@ -119,38 +119,7 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
         : 'Registrar Distribuição de Lucro'
 
   await page.getByRole('button', { name: submitName, exact: true }).click()
-
-  // In production the write can complete before the transaction list finishes
-  // reconciling its local state. Never submit twice (which could create
-  // duplicates); instead re-open/reload the list and give the committed write
-  // a few deterministic opportunities to render.
-  const markerLocator = page.getByText(marker, { exact: true })
-  const deadline = Date.now() + 20_000
-  let found = false
-
-  while (Date.now() < deadline) {
-    if (await markerLocator.isVisible().catch(() => false)) {
-      found = true
-      break
-    }
-
-    await page.waitForTimeout(500).catch(() => {})
-    if (Date.now() >= deadline) break
-
-    await openTransactions(page).catch(() => {})
-    if (await markerLocator.isVisible().catch(() => false)) {
-      found = true
-      break
-    }
-
-    await page.reload().catch(() => {})
-    await expect(page.getByRole('button', { name: /^Sair$/i })).toBeVisible({
-      timeout: 10_000,
-    }).catch(() => {})
-  }
-
-  expect(found, `O marcador ${marker} não apareceu após o salvamento.`).toBe(true)
-  await waitForRemoteSnapshot(page, 15_000).catch(() => {})
+  await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
 }
 
 async function expandTransaction(page, marker) {
@@ -176,7 +145,7 @@ async function deleteTransaction(page, marker) {
   await expect(page.getByText(marker, { exact: true })).toHaveCount(0, { timeout: 10_000 })
 }
 
-async function waitForRemoteSnapshot(page, timeoutMs = 20_000) {
+async function waitForRemoteSnapshot(page, timeoutMs = 15_000) {
   await page.waitForFunction(() => {
     const cache = Object.entries(localStorage).find(([key]) =>
       key.startsWith('pj_app_state_cache_v3_'),
@@ -185,14 +154,14 @@ async function waitForRemoteSnapshot(page, timeoutMs = 20_000) {
 
     try {
       const envelope = JSON.parse(cache[1])
-      return Boolean(envelope?.remoteUpdatedAt) && envelope?.dirty === false
+      return Boolean(envelope?.remoteUpdatedAt)
     } catch {
       return false
     }
   }, null, { timeout: timeoutMs })
 }
 
-async function expectCloudMarker(browser, marker, timeoutMs = 20_000) {
+async function expectCloudMarker(browser, marker, timeoutMs = 30_000) {
   const verificationContext = await browser.newContext()
   const verificationPage = await verificationContext.newPage()
 
@@ -211,9 +180,8 @@ async function expectCloudMarker(browser, marker, timeoutMs = 20_000) {
         lastError = error
       }
 
-      if (Date.now() >= deadline) break
-      await verificationPage.waitForTimeout(500).catch(() => {})
       await verificationPage.reload().catch(() => {})
+      await verificationPage.waitForTimeout(750)
     }
 
     throw lastError || new Error(`O marcador ${marker} não foi encontrado na nuvem.`)
@@ -371,28 +339,19 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
   test('1.2 dados — receita, favorito, edição, despesa, distribuição e exclusão', async ({ page }) => {
     await createTransaction(page, 'Receita', QA_MARKER, '123,45', true)
 
+    // saveFavs persists asynchronously and the app also hydrates its state
+    // asynchronously on first mount. Reload once after the save so this
+    // assertion is based on the durable favorites state, not a transient
+    // in-memory render that can still be replaced by the initial hydration.
+    await page.reload()
+    await expect(page.getByRole('button', { name: /^Sair$/i })).toBeVisible({ timeout: 15_000 })
+
     await page.getByRole('button', { name: 'Configurações' }).click()
     await page.getByText('⭐ Favoritos', { exact: true }).click()
     const favoritesHeading = page.getByRole('heading', { name: '⭐ Favoritos', exact: true })
     await expect(favoritesHeading).toBeVisible({ timeout: 10_000 })
     const favoritesModal = favoritesHeading.locator('xpath=../..')
-    const favoriteMarker = favoritesModal.getByText(QA_MARKER, { exact: true })
-    let favoriteFound = false
-    const favoriteDeadline = Date.now() + 15_000
-    while (Date.now() < favoriteDeadline) {
-      if (await favoriteMarker.isVisible().catch(() => false)) {
-        favoriteFound = true
-        break
-      }
-      await page.waitForTimeout(500).catch(() => {})
-      await page.getByRole('button', { name: '✕' }).click().catch(() => {})
-      await page.getByRole('button', { name: 'Configurações' }).click().catch(() => {})
-      await page.getByText('⭐ Favoritos', { exact: true }).click().catch(() => {})
-      await expect(page.getByRole('heading', { name: '⭐ Favoritos', exact: true })).toBeVisible({
-        timeout: 5_000,
-      }).catch(() => {})
-    }
-    expect(favoriteFound, `O favorito ${QA_MARKER} não apareceu no modal de Favoritos.`).toBe(true)
+    await expect(favoritesModal.getByText(QA_MARKER, { exact: true })).toHaveCount(1, { timeout: 10_000 })
     await page.getByRole('button', { name: '✕' }).click()
 
     await openTransactions(page)
@@ -437,19 +396,12 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       /Pró-labore/i,
       /INSS do Sócio/i,
       /Contabilidade/i,
+      /^IRRF$/i,
       /Total de Obrigações/i,
     ]) {
       await expect(page.getByText(label).first()).toBeVisible({
         timeout: 10_000,
       })
-    }
-
-    // IRRF is conditional in the production calculation: when the current
-    // pró-labore is below the applicable threshold, the UI can legitimately
-    // omit an IRRF line. If the line is rendered, it must be visible.
-    const irrf = page.getByText(/^IRRF$/i).first()
-    if (await irrf.count()) {
-      await expect(irrf).toBeVisible({ timeout: 5_000 })
     }
   })
 
@@ -515,7 +467,6 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
         await expect(reopenedOffline.getByText(marker, { exact: true })).toBeVisible({
           timeout: 15_000,
         })
-        await waitForRemoteSnapshot(reopenedOffline, 20_000).catch(() => {})
 
         // Verify with a completely fresh browser context, which has no local
         // cache and therefore can only see the marker if it really reached
@@ -552,7 +503,6 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       await login(first)
       await openTransactions(first)
       await createTransaction(first, 'Receita', baseline)
-      await waitForRemoteSnapshot(first, 20_000).catch(() => {})
 
       const baselineCloud = await expectCloudMarker(browser, baseline, 30_000)
       await baselineCloud.context().close().catch(() => {})
@@ -570,7 +520,6 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       await expect(first.getByText(baseline, { exact: true })).toBeVisible({ timeout: 15_000 })
 
       await createTransaction(first, 'Receita', markerA)
-      await waitForRemoteSnapshot(first, 20_000).catch(() => {})
 
       // Prove A reached Supabase before B attempts its stale write.
       const cloudAfterA = await expectCloudMarker(browser, markerA, 30_000)
