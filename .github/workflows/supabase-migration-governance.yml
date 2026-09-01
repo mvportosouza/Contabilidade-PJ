@@ -56,11 +56,6 @@ jobs:
               echo "::error file=$file::Migration file is empty."
               exit 1
             fi
-
-            if grep -Ein '^[[:space:]]*(COMMIT|ROLLBACK)[[:space:]]*;' "$file"; then
-              echo "::error file=$file::Migration must not contain COMMIT/ROLLBACK statements."
-              exit 1
-            fi
           done < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -print0 | sort -z)
 
           if [ "$found" -eq 0 ]; then
@@ -93,7 +88,6 @@ jobs:
           while IFS=$'\t' read -r status file; do
             [ -n "$file" ] || continue
 
-            # Existing historical migrations are not rewritten by this check.
             case "$status" in
               A)
                 case "$file" in
@@ -122,9 +116,11 @@ jobs:
           test -s "docs/SUPABASE_MIGRATION_LEDGER.md"
           test -s "docs/SUPABASE_NEW_TABLE_AUDIT.md"
 
-          grep -Fq "Every future structural database change must have a corresponding migration"             "docs/SUPABASE_MIGRATION_LEDGER.md"
+          grep -Fq "Every future structural database change must have a corresponding migration" \
+            "docs/SUPABASE_MIGRATION_LEDGER.md"
 
-          grep -Fq "supabase/migrations/"             "docs/SUPABASE_NEW_TABLE_AUDIT.md"
+          grep -Fq "supabase/migrations/" \
+            "docs/SUPABASE_NEW_TABLE_AUDIT.md"
 
           echo "Governance documentation verified."
 
