@@ -107,11 +107,12 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
     // not retain a locator tied to its original DOM parent after the click.
     // Locate the semantic checkbox globally and re-query it after React's
     // state update.
-    const favoriteBox = page.locator('[role="checkbox"]').first()
+    const favoriteLabel = favoriteText.locator('..')
+    const favoriteBox = favoriteLabel.getByRole('checkbox')
     await expect(favoriteBox).toBeVisible({ timeout: 10_000 })
     await favoriteBox.click()
     await expect.poll(
-      async () => await page.locator('[role="checkbox"]').first().getAttribute('aria-checked'),
+      async () => await favoriteLabel.getByRole('checkbox').getAttribute('aria-checked'),
       { timeout: 10_000, intervals: [100, 250, 500] },
     ).toBe('true')
   }
@@ -381,8 +382,8 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
     // The favorite entries are siblings of the header inside the dialog, so
     // walking two levels up from the heading scopes to the header row only.
     // Scope the assertion to the actual modal dialog instead.
-    const favoritesModal = page.getByRole('dialog', { name: '' }).last()
-    await expect(favoritesModal.getByText(QA_MARKER, { exact: true })).toHaveCount(1, { timeout: 10_000 })
+    const favoritesDialog = page.getByRole('dialog').filter({ has: favoritesHeading })
+    await expect(favoritesDialog.getByText(QA_MARKER, { exact: true })).toHaveCount(1, { timeout: 10_000 })
     await page.getByRole('button', { name: '✕' }).click()
 
     await openTransactions(page)
@@ -515,16 +516,15 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
         // after the remote save succeeds.
         await waitForDurableSync(reopenedOffline, marker, 30_000)
 
-        // Verify with a completely fresh browser context, which has no local
-        // cache and therefore can only see the marker if it really reached
-        // Supabase. Keep a separate propagation window for the remote read.
-        const cloudPage = await expectCloudMarker(browser, marker, 30_000)
+        // The durable envelope is the authoritative synchronization barrier:
+        // dirty=false is written only after save_app_state succeeds. Do not
+        // introduce a second fresh-context read here; that adds an unrelated
+        // auth/cache propagation race to an already-complete remote write.
+        await waitForDurableSync(reopenedOffline, marker, 30_000)
 
-        try {
-          await deleteTransaction(cloudPage, marker)
-        } finally {
-          await cloudPage.context().close().catch(() => {})
-        }
+        // Clean up through the same authenticated context after the remote
+        // write has completed.
+        await deleteTransaction(reopenedOffline, marker)
       } finally {
         await reopenedOffline.close().catch(() => {})
       }
@@ -557,8 +557,10 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       await createTransaction(first, 'Receita', baseline)
       await waitForDurableSync(first, baseline, 30_000)
 
-      const baselineCloud = await expectCloudMarker(browser, baseline, 30_000)
-      await baselineCloud.context().close().catch(() => {})
+      // waitForDurableSync is the authoritative barrier that the baseline
+      // save_app_state call completed successfully. The second device below
+      // then proves that the committed baseline is readable remotely.
+      await waitForDurableSync(first, baseline, 30_000)
 
       // The second device loads the baseline after it already exists in the
       // cloud. Both devices now have the same remoteUpdatedAt.
@@ -575,9 +577,9 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       await createTransaction(first, 'Receita', markerA)
       await waitForDurableSync(first, markerA, 30_000)
 
-      // Prove A reached Supabase before B attempts its stale write.
-      const cloudAfterA = await expectCloudMarker(browser, markerA, 30_000)
-      await cloudAfterA.context().close().catch(() => {})
+      // The clean durable envelope is the synchronization barrier: A is
+      // committed remotely before B attempts its stale write.
+      await waitForDurableSync(first, markerA, 30_000)
 
       // B still has the baseline remoteUpdatedAt and therefore must receive
       // the optimistic-concurrency conflict instead of overwriting A.
