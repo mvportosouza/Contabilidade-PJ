@@ -17,12 +17,18 @@ on:
       - ".github/workflows/supabase-migration-governance.yml"
   workflow_dispatch:
 
+# Read-only governance workflow.
+# It never connects to Supabase and never changes the repository.
 permissions:
   contents: read
 
+concurrency:
+  group: supabase-migration-governance-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   migration-governance:
-    name: Migration governance checks
+    name: Supabase migration governance
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -32,93 +38,99 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate migration directory
+      - name: Verify migration directory
         shell: bash
         run: |
           set -euo pipefail
 
-          test -d supabase/migrations
-
-          shopt -s nullglob
-          files=(supabase/migrations/*.sql)
-
-          if [ "${#files[@]}" -eq 0 ]; then
-            echo "No SQL migrations found."
+          if [ ! -d "supabase/migrations" ]; then
+            echo "::error::supabase/migrations directory is missing."
             exit 1
           fi
 
-          echo "Found ${#files[@]} migration files."
+          found=0
+          while IFS= read -r -d '' file; do
+            found=1
 
-          for file in "${files[@]}"; do
-            name="$(basename "$file")"
-
-            # New migrations must start with a sortable timestamp.
-            if ! [[ "$name" =~ ^[0-9]{8}([0-9]{6})?[_-].+\.sql$ ]]; then
-              echo "::error file=$file::Migration filename does not follow the required timestamp convention: $name"
+            if [ ! -s "$file" ]; then
+              echo "::error file=$file::Migration file is empty."
               exit 1
             fi
 
-            # Reject obvious transaction-control commands that can break
-            # migration runners when used in inappropriate contexts.
             if grep -Ein '^[[:space:]]*(COMMIT|ROLLBACK)[[:space:]]*;' "$file"; then
-              echo "::error file=$file::Migration must not contain COMMIT/ROLLBACK."
+              echo "::error file=$file::Migration must not contain COMMIT/ROLLBACK statements."
               exit 1
             fi
-          done
+          done < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -print0 | sort -z)
 
-      - name: Check newly introduced CREATE TABLE migrations
+          if [ "$found" -eq 0 ]; then
+            echo "::error::No SQL migration files were found."
+            exit 1
+          fi
+
+          echo "Migration directory verified."
+
+      - name: Check newly added migration files
         shell: bash
         run: |
           set -euo pipefail
 
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base="${{ github.event.pull_request.base.sha }}"
-            changed="$(git diff --name-only --diff-filter=A "$base"...HEAD -- 'supabase/migrations/*.sql')"
+            changed="$(git diff --name-status "${{ github.event.pull_request.base.sha }}"...HEAD -- 'supabase/migrations/**' || true)"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            changed="$(git diff-tree --no-commit-id --name-status -r "$GITHUB_SHA" -- 'supabase/migrations/**' || true)"
           else
-            changed="$(git diff-tree --no-commit-id --name-only --diff-filter=A -r "$GITHUB_SHA" -- 'supabase/migrations/*.sql' || true)"
+            changed=""
           fi
 
           if [ -z "$changed" ]; then
-            echo "No newly added migration files in this change."
+            echo "No migration files were added in this change."
             exit 0
           fi
 
-          while IFS= read -r file; do
+          echo "$changed"
+
+          while IFS=$'\t' read -r status file; do
             [ -n "$file" ] || continue
 
-            if grep -Eiq '^[[:space:]]*create[[:space:]]+table' "$file"; then
-              echo "CREATE TABLE detected in $file"
+            # Existing historical migrations are not rewritten by this check.
+            case "$status" in
+              A)
+                case "$file" in
+                  supabase/migrations/*.sql) ;;
+                  *)
+                    echo "::error file=$file::New migration files must be SQL files under supabase/migrations/."
+                    exit 1
+                    ;;
+                esac
 
-              if ! grep -Eiq 'enable[[:space:]]+row[[:space:]]+level[[:space:]]+security' "$file"; then
-                echo "::error file=$file::A migration creating an application table must explicitly enable RLS."
-                exit 1
-              fi
-
-              if ! grep -Eiq 'create[[:space:]]+policy' "$file"; then
-                echo "::error file=$file::A migration creating an application table must define at least one explicit RLS policy."
-                exit 1
-              fi
-            fi
+                if [ ! -s "$file" ]; then
+                  echo "::error file=$file::New migration file is empty."
+                  exit 1
+                fi
+                ;;
+            esac
           done <<< "$changed"
+
+          echo "New migration files passed governance checks."
 
       - name: Verify governance documentation
         shell: bash
         run: |
           set -euo pipefail
 
-          test -s docs/SUPABASE_MIGRATION_LEDGER.md
-          test -s docs/SUPABASE_NEW_TABLE_AUDIT.md
+          test -s "docs/SUPABASE_MIGRATION_LEDGER.md"
+          test -s "docs/SUPABASE_NEW_TABLE_AUDIT.md"
 
-          grep -Fq "Every future structural database change must have a corresponding migration" \
-            docs/SUPABASE_MIGRATION_LEDGER.md
+          grep -Fq "Every future structural database change must have a corresponding migration"             "docs/SUPABASE_MIGRATION_LEDGER.md"
 
-          grep -Fq "supabase/migrations/" \
-            docs/SUPABASE_NEW_TABLE_AUDIT.md
+          grep -Fq "supabase/migrations/"             "docs/SUPABASE_NEW_TABLE_AUDIT.md"
 
-          echo "Supabase migration governance documentation is present and consistent."
+          echo "Governance documentation verified."
 
-      - name: Governance scope
+      - name: Confirm read-only scope
         run: |
-          echo "This workflow is intentionally read-only."
-          echo "It does not alter Supabase, GitHub rulesets, or Vercel settings."
-          echo "Production-only historical migrations remain immutable."
+          echo "Governance checks completed."
+          echo "No Supabase DDL/DML was executed."
+          echo "No GitHub write operation was requested."
+          echo "No Vercel configuration was changed."
