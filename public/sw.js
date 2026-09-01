@@ -38,7 +38,7 @@ const isPublicStaticAsset = (url) =>
 const isApiRequest = (url) =>
   url.pathname.startsWith('/api/');
 
-async function putCache(request, response) {
+async function cacheResponse(request, response) {
   if (!response?.ok) return response;
 
   try {
@@ -112,7 +112,7 @@ self.addEventListener('fetch', (event) => {
         if (cached) return cached;
 
         return fetch(event.request)
-          .then((response) => putCache(event.request, response));
+          .then((response) => cacheResponse(event.request, response));
       }),
     );
     return;
@@ -121,7 +121,7 @@ self.addEventListener('fetch', (event) => {
   if (isPublicStaticAsset(url)) {
     event.respondWith(
       fetch(event.request)
-        .then((response) => putCache(event.request, response))
+        .then((response) => cacheResponse(event.request, response))
         .catch(() => caches.match(event.request)),
     );
     return;
@@ -130,7 +130,7 @@ self.addEventListener('fetch', (event) => {
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request)
-        .then((response) => putCache(new Request('/'), response))
+        .then((response) => cacheResponse(new Request('/'), response))
         .catch(() => caches.match('/')),
     );
   }
