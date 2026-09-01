@@ -142,15 +142,18 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
 }
 
 async function expandTransaction(page, marker) {
-  const text = page.getByText(marker, { exact: true })
-  await expect(text).toBeVisible({ timeout: 15_000 })
+  // TransactionCard exposes a stable test id. Do not infer the card by
+  // climbing a fixed number of DOM ancestors from the marker text: the
+  // internal layout can change without changing the transaction semantics.
+  const card = page.getByTestId('transaction-card').filter({
+    has: page.getByText(marker, { exact: true }),
+  })
 
-  // TxCard tem uma estrutura fixa: p(nome) -> div(conteúdo) ->
-  // div(linha) -> div(card). Subir exatamente esses 3 níveis evita que um
-  // ancestor mais externo seja escolhido pelo XPath e perca os botões Editar/
-  // Excluir.
-  const card = text.locator('xpath=../../..')
-  await expect(card).toBeVisible({ timeout: 10_000 })
+  await expect(card).toHaveCount(1, { timeout: 15_000 })
+  await expect(card.getByText(marker, { exact: true })).toBeVisible({
+    timeout: 10_000,
+  })
+
   await card.locator('button').first().click()
   await expect(card.getByRole('button', { name: /Editar/i })).toBeVisible({
     timeout: 10_000,
