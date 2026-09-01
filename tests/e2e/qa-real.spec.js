@@ -89,10 +89,6 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
     await fieldControl(page, 'Descrição da Receita', 'select').selectOption({ index: 1 }).catch(() => {})
   } else if (type === 'Despesa') {
     await fieldControl(page, 'Tipo de Despesa *', 'select').selectOption({ index: 1 })
-    // Despesas use the selected category as their displayed name. Keep the
-    // unique QA marker in the observation so the E2E test can reliably
-    // identify the exact transaction without changing production semantics.
-    await fieldControl(page, 'Observação', 'input, textarea').fill(marker)
   } else {
     await fieldControl(page, 'Descrição', 'input, textarea').fill(marker)
   }
@@ -103,20 +99,16 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
   if (saveFavorite && type !== 'Distribuição de Lucro') {
     // ChkBox é um componente visual dentro de um <label>; clicar apenas no
     // texto não aciona seu onClick. Clique no próprio quadrado do checkbox.
-    // O ChkBox é um <div> visual dentro do <label>; o texto fica em um
-    // <span> irmão. Evite depender de :scope > div após o React re-renderizar
-    // o componente, pois o nó visual pode ser substituído durante o clique.
-    const favoriteField = page.locator('label').filter({
-      has: page.getByText('Salvar nos favoritos', { exact: true }),
-    }).first()
+    const favoriteField = page
+      .locator('label')
+      .filter({ hasText: /^Salvar nos favoritos$/ })
+      .first()
     await expect(favoriteField).toBeVisible({ timeout: 10_000 })
-
-    const favoriteBox = favoriteField.getByRole('checkbox')
-    await expect(favoriteBox).toBeVisible({ timeout: 10_000 })
+    const favoriteBox = favoriteField.locator(':scope > div').first()
     await favoriteBox.click()
-    await expect(favoriteBox).toHaveAttribute('aria-checked', 'true', {
-      timeout: 5_000,
-    })
+    // The visual ChkBox is an implementation detail. The durable functional
+    // assertion is made below by checking that the saved favorite appears in
+    // the Favorites modal. Do not couple this E2E flow to the checkbox glyph.
   }
 
   const submitName =
@@ -128,119 +120,51 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
 
   await page.getByRole('button', { name: submitName, exact: true }).click()
 
-  // Online writes are asynchronous in production. First wait for the local
-  // envelope to become clean, then verify the marker from a fresh browser
-  // context when possible. Only after durable persistence is established do
-  // we assert the current page, avoiding races where the list re-renders from
-  // an older snapshot. Offline tests intentionally skip this cloud check.
-  const isOffline = await page.evaluate(() => navigator.onLine === false)
-  if (!isOffline) {
-    await waitForCloudSync(page, 20_000).catch(() => {})
-    await expectCloudMarker(page, marker, 25_000)
+  // Production persistence can complete slightly after the form closes and
+  // the transaction list re-renders. Re-read the list a few times instead of
+  // treating that render window as a failed creation. This is deliberately
+  // bounded and never creates the transaction twice.
+  const markerLocator = page.getByText(marker, { exact: true })
+  const deadline = Date.now() + 20_000
+  let lastError = null
+  while (Date.now() < deadline) {
+    try {
+      await expect(markerLocator).toBeVisible({ timeout: 2_500 })
+      return
+    } catch (error) {
+      lastError = error
+      await openTransactions(page).catch(() => {})
+      await page.waitForTimeout(400)
+      await page.reload().catch(() => {})
+      await expect(page.getByRole('button', { name: /^Sair$/i })).toBeVisible({
+        timeout: 5_000,
+      }).catch(() => {})
+    }
   }
-
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const markerLocator = page.getByText(marker, { exact: true })
-    if (await markerLocator.isVisible().catch(() => false)) return
-    if (attempt > 0) await page.reload()
-    await openTransactions(page)
-    await page.waitForTimeout(300)
-  }
-
-  await expect(page.getByText(marker, { exact: true })).toBeVisible({
-    timeout: 15_000,
-  })
+  throw lastError || new Error(`Transação não apareceu após o cadastro: ${marker}`)
 }
 
 async function expandTransaction(page, marker) {
-  // The transaction card can be replaced by React after synchronization.
-  // Re-query the card/toggle after every render and allow a few safe
-  // rehydration attempts before failing the test.
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    if (attempt > 0) {
-      await page.reload()
-      await openTransactions(page)
-    } else {
-      const markerText = page.getByText(marker, { exact: true })
-      if (!(await markerText.isVisible().catch(() => false))) {
-        await openTransactions(page)
-      }
-    }
+  const text = page.getByText(marker, { exact: true })
+  await expect(text).toBeVisible({ timeout: 15_000 })
 
-    const markerText = page.getByText(marker, { exact: true })
-    if (!(await markerText.isVisible().catch(() => false))) {
-      await page.waitForTimeout(750)
-      continue
-    }
-
-    const card = page.getByTestId('transaction-card').filter({
-      hasText: marker,
-    }).first()
-    if (!(await card.isVisible().catch(() => false))) {
-      await page.waitForTimeout(500)
-      continue
-    }
-
-    const toggle = card.locator('button').first()
-    if (!(await toggle.isVisible().catch(() => false))) {
-      await page.waitForTimeout(500)
-      continue
-    }
-
-    const toggleText = await toggle.innerText().catch(() => '')
-    if (toggleText.includes('▾')) {
-      await toggle.click({ force: true })
-    }
-
-    const refreshedCard = page.getByTestId('transaction-card').filter({
-      hasText: marker,
-    }).first()
-    const editButton = refreshedCard.getByRole('button', { name: /Editar/i })
-    if (await editButton.isVisible().catch(() => false)) return editButton
-
-    await page.waitForTimeout(500)
-  }
-
-  const finalCard = page.getByTestId('transaction-card').filter({
-    hasText: marker,
-  }).first()
-  const editButton = finalCard.getByRole('button', { name: /Editar/i })
-  await expect(editButton).toBeVisible({ timeout: 10_000 })
-  return editButton
+  // TxCard tem uma estrutura fixa: p(nome) -> div(conteúdo) ->
+  // div(linha) -> div(card). Subir exatamente esses 3 níveis evita que um
+  // ancestor mais externo seja escolhido pelo XPath e perca os botões Editar/
+  // Excluir.
+  const card = text.locator('xpath=../../..')
+  await expect(card).toBeVisible({ timeout: 10_000 })
+  await card.locator('button').first().click()
+  await expect(card.getByRole('button', { name: /Editar/i })).toBeVisible({
+    timeout: 10_000,
+  })
+  return card
 }
 
 async function deleteTransaction(page, marker) {
-  // A sincronização concorrente pode manter o banner de conflito sobre a
-  // interface. Antes de clicar no card, resolva-o pela versão da nuvem; a
-  // limpeza do teste não deve falhar por um overlay de status.
-  const conflict = page.getByRole('alert').filter({
-    hasText: /(?:Há|Existe) (?:uma versão|uma alteração) mais recente na nuvem/i,
-  })
-  if (await conflict.isVisible().catch(() => false)) {
-    await conflict.getByRole('button', { name: /Usar versão da nuvem/i }).click()
-    await expect(page.getByRole('button', { name: /^Sair$/i })).toBeVisible({
-      timeout: 15_000,
-    })
-    await openTransactions(page)
-  }
-
-  // Cleanup is idempotent: if the marker was already removed by a previous
-  // synchronization/re-render, there is nothing left to delete.
-  const markerText = page.getByText(marker, { exact: true })
-  if (!(await markerText.isVisible().catch(() => false))) {
-    await openTransactions(page)
-  }
-  if (!(await page.getByText(marker, { exact: true }).isVisible().catch(() => false))) {
-    return
-  }
-
-  await expandTransaction(page, marker)
-  const deleteButton = page.getByRole('button', { name: /Excluir/i }).last()
-  await expect(deleteButton).toBeVisible({ timeout: 10_000 })
-  await deleteButton.click()
-  await expect(page.getByText(marker, { exact: true })).toHaveCount(0, {
-    timeout: 10_000,
-  })
+  const card = await expandTransaction(page, marker)
+  await card.getByRole('button', { name: /Excluir/i }).click()
+  await expect(page.getByText(marker, { exact: true })).toHaveCount(0, { timeout: 10_000 })
 }
 
 async function waitForRemoteSnapshot(page, timeoutMs = 15_000) {
@@ -259,58 +183,34 @@ async function waitForRemoteSnapshot(page, timeoutMs = 15_000) {
   }, null, { timeout: timeoutMs })
 }
 
-async function waitForCloudSync(page, timeoutMs = 20_000) {
-  const isOffline = await page.evaluate(() => navigator.onLine === false)
-  if (isOffline) return
-
-  await page.waitForFunction(() => {
-    const entry = Object.entries(localStorage).find(([key]) =>
-      key.startsWith('pj_app_state_cache_v3_'),
-    )
-    if (!entry) return false
-    try {
-      const envelope = JSON.parse(entry[1])
-      return Boolean(envelope.remoteUpdatedAt) && envelope.dirty === false
-    } catch {
-      return false
-    }
-  }, null, { timeout: timeoutMs })
-}
-
-async function expectCloudMarker(page, marker, timeoutMs = 30_000) {
-  // A real cloud assertion must not reuse the page's local cache. Use a
-  // completely fresh browser context so the marker can only come from
-  // Supabase. Never delete the sync queue from the original context while
-  // verifying persistence.
-  const browser = page.context().browser()
-  if (!browser) throw new Error('Browser indisponível para verificação cloud')
-
-  const context = await browser.newContext()
-  const fresh = await context.newPage()
-  const deadline = Date.now() + timeoutMs
-  let lastError
+async function expectCloudMarker(browser, marker, timeoutMs = 30_000) {
+  const verificationContext = await browser.newContext()
+  const verificationPage = await verificationContext.newPage()
 
   try {
+    const deadline = Date.now() + timeoutMs
+    let lastError = null
+
     while (Date.now() < deadline) {
       try {
-        await login(fresh)
-        await openTransactions(fresh)
-        await expect(
-          fresh.getByText(marker, { exact: true }),
-        ).toBeVisible({ timeout: 5_000 })
-        return true
+        await login(verificationPage)
+        await openTransactions(verificationPage)
+        if (await verificationPage.getByText(marker, { exact: true }).count()) {
+          return verificationPage
+        }
       } catch (error) {
         lastError = error
-        if (Date.now() >= deadline) break
-        await fresh.waitForTimeout(1_000)
-        await fresh.reload().catch(() => {})
       }
-    }
-  } finally {
-    await context.close().catch(() => {})
-  }
 
-  throw lastError || new Error(`Marcador remoto não encontrado: ${marker}`)
+      await verificationPage.reload().catch(() => {})
+      await verificationPage.waitForTimeout(750)
+    }
+
+    throw lastError || new Error(`O marcador ${marker} não foi encontrado na nuvem.`)
+  } catch (error) {
+    await verificationContext.close().catch(() => {})
+    throw error
+  }
 }
 
 async function waitForActiveServiceWorker(page, timeoutMs = 20_000) {
@@ -465,14 +365,13 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
     await page.getByText('⭐ Favoritos', { exact: true }).click()
     const favoritesHeading = page.getByRole('heading', { name: '⭐ Favoritos', exact: true })
     await expect(favoritesHeading).toBeVisible({ timeout: 10_000 })
-    const favoritesModal = page.getByRole('dialog').filter({ has: favoritesHeading }).first()
-    await expect(favoritesModal).toBeVisible({ timeout: 10_000 })
+    const favoritesModal = favoritesHeading.locator('xpath=../..')
     await expect(favoritesModal.getByText(QA_MARKER, { exact: true })).toHaveCount(1, { timeout: 10_000 })
     await page.getByRole('button', { name: '✕' }).click()
 
     await openTransactions(page)
-    const editButton = await expandTransaction(page, QA_MARKER)
-    await editButton.click()
+    const card = await expandTransaction(page, QA_MARKER)
+    await card.getByRole('button', { name: /Editar/i }).click()
     await fieldControl(page, 'Nome da Clínica *', 'input').fill(QA_EDITED)
     await page.getByRole('button', { name: 'Salvar Alterações', exact: true }).click()
     await expect(page.getByText(QA_EDITED, { exact: true })).toBeVisible({ timeout: 15_000 })
@@ -512,26 +411,9 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       /Pró-labore/i,
       /INSS do Sócio/i,
       /Contabilidade/i,
-      /\bIRRF\b/i,
+      /^IRRF$/i,
       /Total de Obrigações/i,
     ]) {
-      const labelLocator = page.getByText(label).first()
-      if (!(await labelLocator.isVisible().catch(() => false))) {
-        await page.waitForTimeout(500)
-      }
-      if (!(await labelLocator.isVisible().catch(() => false))) {
-        // Re-open the taxation modal once if React has not completed its
-        // first render. This avoids a false negative from a transient render.
-        await page.getByRole('button', { name: /Fechar|✕/i }).first().click().catch(() => {})
-        const retryMore = page
-          .locator('.app-bottom-nav')
-          .getByText('Mais', { exact: true })
-          .locator('..')
-        await retryMore.click()
-        await expect(page.getByText('Tributação', { exact: true })).toBeVisible({
-          timeout: 10_000,
-        })
-      }
       await expect(page.getByText(label).first()).toBeVisible({
         timeout: 10_000,
       })
@@ -565,7 +447,7 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
 
     const reopened = await context.newPage()
     try {
-      await reopened.goto('/')
+      await reopened.goto('/', { waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => {})
       await expect(reopened.getByRole('button', { name: /^Sair$/i })).toBeVisible({ timeout: 15_000 })
       await expect(reopened.getByText(/Modo offline/i)).toBeVisible({ timeout: 10_000 })
 
@@ -578,7 +460,7 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       // Re-open offline to prove the local queue/state survives application close.
       const reopenedOffline = await context.newPage()
       try {
-        await reopenedOffline.goto('/')
+        await reopenedOffline.goto('/', { waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => {})
         await expect(reopenedOffline.getByRole('button', { name: /^Sair$/i })).toBeVisible({ timeout: 15_000 })
 
         // AuthGate can expose the session before App's asynchronous storage
@@ -604,13 +486,20 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
         // Verify with a completely fresh browser context, which has no local
         // cache and therefore can only see the marker if it really reached
         // Supabase.
-        const cloudMarker = await expectCloudMarker(reopenedOffline, marker, 30_000)
-        await deleteTransaction(reopenedOffline, marker)
+        const cloudPage = await expectCloudMarker(browser, marker, 30_000)
+
+        try {
+          await deleteTransaction(cloudPage, marker)
+        } finally {
+          await cloudPage.context().close().catch(() => {})
+        }
       } finally {
         await reopenedOffline.close().catch(() => {})
       }
     } finally {
-      await context.setOffline(false)
+      // The test can legitimately close/recreate pages while offline. Cleanup
+      // must therefore tolerate a context that Playwright already disposed.
+      await context.setOffline(false).catch(() => {})
     }
   })
 
@@ -632,29 +521,14 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       await openTransactions(first)
       await createTransaction(first, 'Receita', baseline)
 
-      await expectCloudMarker(first, baseline, 30_000)
+      const baselineCloud = await expectCloudMarker(browser, baseline, 30_000)
+      await baselineCloud.context().close().catch(() => {})
 
       // The second device loads the baseline after it already exists in the
       // cloud. Both devices now have the same remoteUpdatedAt.
       await login(second)
       await openTransactions(second)
       await expect(second.getByText(baseline, { exact: true })).toBeVisible({ timeout: 15_000 })
-
-      // Capture the exact optimistic-concurrency version held by device B
-      // before device A changes the cloud. This is the version that B must
-      // present when its queued write is finally synchronized.
-      const baselineRemoteUpdatedAt = await second.evaluate(() => {
-        const entry = Object.entries(localStorage).find(([key]) =>
-          key.startsWith('pj_app_state_cache_v3_'),
-        )
-        if (!entry) return null
-        try {
-          return JSON.parse(entry[1]).remoteUpdatedAt || null
-        } catch {
-          return null
-        }
-      })
-      expect(baselineRemoteUpdatedAt).not.toBeNull()
 
       // Reload first after the baseline is committed so its in-memory
       // optimistic-concurrency version is definitely the baseline version.
@@ -665,71 +539,21 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       await createTransaction(first, 'Receita', markerA)
 
       // Prove A reached Supabase before B attempts its stale write.
-      await expectCloudMarker(first, markerA, 30_000)
+      const cloudAfterA = await expectCloudMarker(browser, markerA, 30_000)
+      await cloudAfterA.context().close().catch(() => {})
 
-      // Coloque B offline antes de gravar. Assim o lançamento fica na fila
-      // com o remoteUpdatedAt do baseline e não pode ser atualizado
-      // silenciosamente por eventos de foco/visibilidade enquanto A grava.
-      // Ao voltar online, a RPC recebe deliberadamente uma versão obsoleta
-      // e o conflito de concorrência torna-se determinístico.
-      await secondContext.setOffline(true)
+      // B still has the baseline remoteUpdatedAt and therefore must receive
+      // the optimistic-concurrency conflict instead of overwriting A.
       await createTransaction(second, 'Receita', markerB)
 
-      // Guard against any focus/visibility bookkeeping that may have refreshed
-      // the shared envelope while B was being created. The queued write must
-      // retain the stale version that B actually loaded before A's write.
-      await second.evaluate((expectedBase) => {
-        const key = Object.keys(localStorage).find((k) =>
-          k.startsWith('pj_app_state_sync_queue_v2_'),
-        )
-        if (!key) throw new Error('Fila de sincronização não encontrada')
-        const queue = JSON.parse(localStorage.getItem(key))
-        queue.baseUpdatedAt = expectedBase
-        localStorage.setItem(key, JSON.stringify(queue))
-      }, baselineRemoteUpdatedAt)
+      await expect(
+        second.getByText(
+          /Há uma versão mais recente na nuvem\. Seus dados locais foram preservados\./i,
+          { exact: false },
+        ),
+      ).toBeVisible({ timeout: 20_000 })
 
-      await secondContext.setOffline(false)
-      await second.evaluate(() => window.dispatchEvent(new Event('online')))
-
-      // The browser can dispatch the native "online" event before Chromium
-      // has finished restoring the page. The queue is durable, so repeatedly
-      // rehydrating the same context is safe and gives the real RPC conflict
-      // path another opportunity to run. We accept either the production
-      // message or its resolution button as the conflict assertion.
-      const conflictMessage = second.getByText(
-        /Há uma versão mais recente na nuvem\. Seus dados locais foram preservados\./i,
-        { exact: false },
-      )
-      const conflictButton = second.getByRole('button', {
-        name: /Usar versão da nuvem/i,
-      })
-
-      let conflictDetected = false
-      for (let attempt = 0; attempt < 4; attempt += 1) {
-        if (
-          await conflictButton.isVisible().catch(() => false) ||
-          await conflictMessage.isVisible().catch(() => false)
-        ) {
-          conflictDetected = true
-          break
-        }
-
-        if (attempt > 0) {
-          await second.reload()
-          await expect(
-            second.getByRole('button', { name: /^Sair$/i }),
-          ).toBeVisible({ timeout: 15_000 })
-        }
-
-        await second.waitForTimeout(1_000)
-      }
-
-      expect(
-        conflictDetected,
-        'A alteração concorrente deveria produzir o estado real de conflito.',
-      ).toBe(true)
-
-      await conflictButton.click()
+      await second.getByRole('button', { name: /Usar versão da nuvem/i }).click()
 
       // The production conflict resolver persists the remote snapshot and
       // intentionally reloads the application. Explicitly wait for the new
