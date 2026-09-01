@@ -94,6 +94,15 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
     // no cartão da despesa.
     await fieldControl(page, 'Observação', 'input').fill(marker)
   } else {
+    // Distribuição de Lucro exige campos obrigatórios adicionais no formulário
+    // de produção. Preencha-os com dados sintéticos válidos para que o teste
+    // exerça o fluxo real até a persistência, em vez de clicar em Registrar
+    // com o formulário inválido e esperar um marcador que nunca será salvo.
+    if (type === 'Distribuição de Lucro') {
+      await fieldControl(page, 'Beneficiário *', 'input').fill(`Beneficiário ${marker}`)
+      await fieldControl(page, 'CPF do Beneficiário *', 'input').fill('123.456.789-01')
+      await fieldControl(page, 'CNPJ da PJ Pagadora *', 'input').fill('12.345.678/0001-95')
+    }
     await fieldControl(page, 'Descrição', 'input, textarea').fill(marker)
   }
 
