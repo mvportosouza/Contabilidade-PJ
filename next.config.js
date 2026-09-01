@@ -12,22 +12,10 @@ const nextConfig = {
       {
         source: '/(.*)',
         headers: [
-          {
-            key: 'X-Content-Type-Options',
-            value: 'nosniff',
-          },
-          {
-            key: 'X-Frame-Options',
-            value: 'DENY',
-          },
-          {
-            key: 'Referrer-Policy',
-            value: 'strict-origin-when-cross-origin',
-          },
-          {
-            key: 'Permissions-Policy',
-            value: 'camera=(), microphone=(), geolocation=()',
-          },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
           {
             key: 'Content-Security-Policy',
             value: [
@@ -43,6 +31,8 @@ const nextConfig = {
               "connect-src 'self' https://qthvrxnldlttvyspnesc.supabase.co wss://qthvrxnldlttvyspnesc.supabase.co",
               "worker-src 'self' blob:",
               "manifest-src 'self'",
+              "frame-src 'none'",
+              "media-src 'self'",
             ].join('; '),
           },
         ],
@@ -50,14 +40,8 @@ const nextConfig = {
       {
         source: '/sw.js',
         headers: [
-          {
-            key: 'Cache-Control',
-            value: 'no-cache, no-store, must-revalidate',
-          },
-          {
-            key: 'Content-Type',
-            value: 'application/javascript; charset=utf-8',
-          },
+          { key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' },
+          { key: 'Content-Type', value: 'application/javascript; charset=utf-8' },
         ],
       },
     ]
