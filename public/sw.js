@@ -56,7 +56,7 @@ async function clearOldCaches() {
 
   await Promise.all(
     keys
-      .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+      .filter((key) => key.startsWith('contabilidade-pj-') && key !== CACHE_NAME)
       .map((key) => caches.delete(key)),
   );
 }
@@ -66,7 +66,7 @@ async function clearAllAppCaches() {
 
   await Promise.all(
     keys
-      .filter((key) => key.startsWith(CACHE_PREFIX))
+      .filter((key) => key.startsWith('contabilidade-pj-'))
       .map((key) => caches.delete(key)),
   );
 }
