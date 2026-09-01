@@ -104,11 +104,15 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
       .filter({ hasText: /^Salvar nos favoritos$/ })
       .first()
     await expect(favoriteField).toBeVisible({ timeout: 10_000 })
-    const favoriteBox = favoriteField.locator(':scope > div').first()
+
+    // ChkBox is a real ARIA checkbox in the production UI. Targeting the
+    // semantic control is more reliable than depending on the label's child
+    // DOM hierarchy, and also lets the test prove that the option was actually
+    // enabled before submitting the form.
+    const favoriteBox = favoriteField.getByRole('checkbox')
+    await expect(favoriteBox).toBeVisible({ timeout: 10_000 })
     await favoriteBox.click()
-    // The visual ChkBox is an implementation detail. The durable functional
-    // assertion is made below by checking that the saved favorite appears in
-    // the Favorites modal. Do not couple this E2E flow to the checkbox glyph.
+    await expect(favoriteBox).toHaveAttribute('aria-checked', 'true')
   }
 
   const submitName =
@@ -421,6 +425,11 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
   })
 
   test('1.4 offline — alteração sobrevive ao fechamento/reabertura e sincroniza ao voltar online', async ({ page, context, browser }) => {
+    // This flow intentionally exercises a real offline -> online -> cloud
+    // round-trip. Give it enough time for the service worker, local queue and
+    // remote verification without allowing a normal transient delay to turn
+    // into a retry.
+    test.setTimeout(75_000)
     const sw = await waitForActiveServiceWorker(page)
     expect(sw?.scriptURL).toMatch(/\/sw\.js$/)
 
@@ -485,7 +494,12 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
         await reopenedOffline.close().catch(() => {})
       }
     } finally {
-      await context.setOffline(false)
+      // The Playwright test runner closes a context automatically when the
+      // per-test timeout is exceeded. Avoid turning the original failure into
+      // a secondary "context has been closed" error during cleanup.
+      if (!context.pages().every(p => p.isClosed())) {
+        await context.setOffline(false).catch(() => {})
+      }
     }
   })
 
