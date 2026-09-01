@@ -1,3 +1,4 @@
+import { logger } from "../../lib/logger";
 import { useState } from "react";
 import { openPdfBlob } from "../../lib/pdf";
 export function ReportButton({label="Gerar Relatório (PDF)", onGenerate}) {
@@ -13,7 +14,7 @@ export function ReportButton({label="Gerar Relatório (PDF)", onGenerate}) {
       }
       await openPdfBlob(blob);
     } catch (err) {
-      console.error(err);
+      logger.error('api.report_generation_failed', { category: 'api', operation: 'generate_report', code: err?.code, status: err?.status });
       if (typeof window !== "undefined") {
         window.alert("Não foi possível gerar o PDF. Tente novamente.");
       }
