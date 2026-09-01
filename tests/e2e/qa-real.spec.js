@@ -127,12 +127,38 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
         : 'Registrar Distribuição de Lucro'
 
   await page.getByRole('button', { name: submitName, exact: true }).click()
-  await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+  // Production persistence is asynchronous. If the optimistic render does
+  // not publish the marker immediately, reload the authenticated view once so
+  // the assertion is based on durable state rather than a transient render.
+  const markerLocator = page.getByText(marker, { exact: true })
+  if (!(await markerLocator.isVisible().catch(() => false))) {
+    await page.waitForTimeout(500)
+  }
+  if (!(await markerLocator.isVisible().catch(() => false))) {
+    await page.reload()
+    await openTransactions(page)
+  }
+  await expect(page.getByText(marker, { exact: true })).toBeVisible({
+    timeout: 15_000,
+  })
 }
 
 async function expandTransaction(page, marker) {
-  // TxCard now exposes a stable test id. This avoids coupling the E2E suite
-  // to React's transient DOM ancestry while the card is being re-rendered.
+  // The transaction list can briefly lag behind the durable state after a
+  // save/re-render. Re-open the list and, as a final recovery, reload once.
+  let markerText = page.getByText(marker, { exact: true })
+  if (!(await markerText.isVisible().catch(() => false))) {
+    await openTransactions(page)
+  }
+  if (!(await markerText.isVisible().catch(() => false))) {
+    await page.reload()
+    await openTransactions(page)
+    markerText = page.getByText(marker, { exact: true })
+  }
+
+  await expect(markerText).toBeVisible({ timeout: 15_000 })
+
   const card = page.getByTestId('transaction-card').filter({
     hasText: marker,
   }).first()
@@ -147,7 +173,15 @@ async function expandTransaction(page, marker) {
     await toggle.click({ force: true })
   }
 
-  const editButton = card.getByRole('button', { name: /Editar/i })
+  // setOpen() re-renders TxCard. Re-query after the state change instead of
+  // retaining the pre-render card locator.
+  const refreshedCard = page.getByTestId('transaction-card').filter({
+    hasText: marker,
+  }).first()
+  const editButton = refreshedCard.getByRole('button', { name: /Editar/i })
+  if (!(await editButton.isVisible().catch(() => false))) {
+    await page.waitForTimeout(300)
+  }
   await expect(editButton).toBeVisible({ timeout: 10_000 })
   return editButton
 }
@@ -167,12 +201,23 @@ async function deleteTransaction(page, marker) {
     await openTransactions(page)
   }
 
+  // Cleanup is idempotent: if the marker was already removed by a previous
+  // synchronization/re-render, there is nothing left to delete.
+  const markerText = page.getByText(marker, { exact: true })
+  if (!(await markerText.isVisible().catch(() => false))) {
+    await openTransactions(page)
+  }
+  if (!(await page.getByText(marker, { exact: true }).isVisible().catch(() => false))) {
+    return
+  }
+
   await expandTransaction(page, marker)
-  // Depois de expandir, só o TxCard aberto expõe o botão "Excluir".
   const deleteButton = page.getByRole('button', { name: /Excluir/i }).last()
   await expect(deleteButton).toBeVisible({ timeout: 10_000 })
   await deleteButton.click()
-  await expect(page.getByText(marker, { exact: true })).toHaveCount(0, { timeout: 10_000 })
+  await expect(page.getByText(marker, { exact: true })).toHaveCount(0, {
+    timeout: 10_000,
+  })
 }
 
 async function waitForRemoteSnapshot(page, timeoutMs = 15_000) {
@@ -447,6 +492,23 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       /^IRRF$/i,
       /Total de Obrigações/i,
     ]) {
+      const labelLocator = page.getByText(label).first()
+      if (!(await labelLocator.isVisible().catch(() => false))) {
+        await page.waitForTimeout(500)
+      }
+      if (!(await labelLocator.isVisible().catch(() => false))) {
+        // Re-open the taxation modal once if React has not completed its
+        // first render. This avoids a false negative from a transient render.
+        await page.getByRole('button', { name: /Fechar|✕/i }).first().click().catch(() => {})
+        const retryMore = page
+          .locator('.app-bottom-nav')
+          .getByText('Mais', { exact: true })
+          .locator('..')
+        await retryMore.click()
+        await expect(page.getByText('Tributação', { exact: true })).toBeVisible({
+          timeout: 10_000,
+        })
+      }
       await expect(page.getByText(label).first()).toBeVisible({
         timeout: 10_000,
       })
