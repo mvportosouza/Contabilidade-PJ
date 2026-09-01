@@ -1,3 +1,4 @@
+import { logger } from '../lib/logger'
 import Head from 'next/head'
 import { useEffect } from 'react'
 import ErrorBoundary from '../components/ErrorBoundary'
@@ -17,7 +18,7 @@ export default function MyApp({ Component, pageProps }) {
               }
             })
           })
-        }).catch((error) => console.error('Falha ao registrar Service Worker:', error))
+        }).catch((error) => logger.error('api.service_worker_registration_failed', { category: 'api', operation: 'service_worker_register', code: error?.code, status: error?.status }))
       }
 
       // Do not depend on the window "load" event. In production/fast
