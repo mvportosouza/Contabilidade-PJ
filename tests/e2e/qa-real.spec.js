@@ -350,7 +350,10 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
     await page.getByText('⭐ Favoritos', { exact: true }).click()
     const favoritesHeading = page.getByRole('heading', { name: '⭐ Favoritos', exact: true })
     await expect(favoritesHeading).toBeVisible({ timeout: 10_000 })
-    const favoritesModal = favoritesHeading.locator('xpath=../..')
+    // The favorite entries are siblings of the header inside the dialog, so
+    // walking two levels up from the heading scopes to the header row only.
+    // Scope the assertion to the actual modal dialog instead.
+    const favoritesModal = page.getByRole('dialog', { name: '' }).last()
     await expect(favoritesModal.getByText(QA_MARKER, { exact: true })).toHaveCount(1, { timeout: 10_000 })
     await page.getByRole('button', { name: '✕' }).click()
 
