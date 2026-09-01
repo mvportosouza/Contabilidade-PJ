@@ -109,7 +109,11 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
     // semantic control is more reliable than depending on the label's child
     // DOM hierarchy, and also lets the test prove that the option was actually
     // enabled before submitting the form.
-    const favoriteBox = favoriteField.getByRole('checkbox')
+    // The checkbox is a visual <div role="checkbox"> nested directly in the
+    // label. Target the ARIA element itself instead of relying on Playwright's
+    // label-to-control association, which is not native here because there is
+    // no input/for relationship.
+    const favoriteBox = favoriteField.locator('[role="checkbox"]').first()
     await expect(favoriteBox).toBeVisible({ timeout: 10_000 })
     await favoriteBox.click()
     await expect(favoriteBox).toHaveAttribute('aria-checked', 'true')
@@ -429,7 +433,7 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
     // round-trip. Give it enough time for the service worker, local queue and
     // remote verification without allowing a normal transient delay to turn
     // into a retry.
-    test.setTimeout(75_000)
+    test.setTimeout(100_000)
     const sw = await waitForActiveServiceWorker(page)
     expect(sw?.scriptURL).toMatch(/\/sw\.js$/)
 
@@ -480,9 +484,18 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
           timeout: 15_000,
         })
 
+        // A visible marker only proves that the local cache contains the
+        // change. Before checking a fresh browser context, wait for the
+        // storage banner to disappear. The banner is shown while the queue is
+        // offline, pending, or syncing; after a successful cloud write the
+        // production UI returns to the normal shell and the banner disappears.
+        await expect(
+          reopenedOffline.locator('[role="status"], [role="alert"]'),
+        ).toHaveCount(0, { timeout: 30_000 })
+
         // Verify with a completely fresh browser context, which has no local
         // cache and therefore can only see the marker if it really reached
-        // Supabase.
+        // Supabase. Keep a separate propagation window for the remote read.
         const cloudPage = await expectCloudMarker(browser, marker, 30_000)
 
         try {
