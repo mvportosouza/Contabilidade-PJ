@@ -1,3 +1,4 @@
+import { logger } from '../lib/logger'
 import Image from 'next/image'
 import { useEffect, useState } from 'react'
 import {
@@ -47,7 +48,7 @@ export default function AuthGate({ children }) {
       (event, nextSession) => {
         if (!mounted) return
 
-        console.log('[AuthGate] Auth event:', event)
+        logger.production('auth.event', { operation: event })
 
         setSession(nextSession || null)
         setLoading(false)
@@ -92,10 +93,7 @@ export default function AuthGate({ children }) {
           )
         }
       } catch (err) {
-        console.error(
-          'Erro ao recuperar sessão:',
-          err,
-        )
+        logger.error('auth.session_restore_failed', { category: 'auth', operation: 'restore_session', code: err?.code, status: err?.status })
 
         if (mounted) {
           setSession(null)
@@ -187,10 +185,7 @@ export default function AuthGate({ children }) {
       setMode('login')
       setEmail(normalizedEmail)
     } catch (err) {
-      console.error(
-        'Erro ao solicitar redefinição de senha:',
-        err
-      )
+      logger.error('auth.password_reset_failed', { category: 'auth', operation: 'password_reset', code: err?.code, status: err?.status })
       setError(
         err?.message ||
           'Não foi possível solicitar a redefinição de senha.'
@@ -214,12 +209,9 @@ export default function AuthGate({ children }) {
         'A nova senha precisa ter pelo menos 8 caracteres.',
       )
 
-      const user = await authUpdatePassword(newPassword)
+      await authUpdatePassword(newPassword)
 
-      console.log(
-        '[AuthGate] Senha atualizada:',
-        user?.id,
-      )
+      logger.production('auth.password_updated', { category: 'auth', operation: 'password_update' })
 
       setPassword('')
       setRecoveryActive(false)
@@ -237,10 +229,7 @@ export default function AuthGate({ children }) {
         'Senha atualizada com sucesso. Faça login com sua nova senha.'
       )
     } catch (err) {
-      console.error(
-        'Erro ao atualizar senha:',
-        err
-      )
+      logger.error('auth.password_update_failed', { category: 'auth', operation: 'password_update', code: err?.code, status: err?.status })
 
       setError(
         err?.message ||
@@ -287,10 +276,7 @@ export default function AuthGate({ children }) {
         setPassword('')
       }
     } catch (err) {
-      console.error(
-        'Erro de autenticação:',
-        err
-      )
+      logger.error('auth.operation_failed', { category: 'auth', operation: mode === 'login' ? 'sign_in' : 'sign_up', code: err?.code, status: err?.status })
 
       const message =
         err?.message ||
@@ -311,10 +297,7 @@ export default function AuthGate({ children }) {
     try {
       await authSignOut()
     } catch (error) {
-      console.error(
-        'Erro ao sair da conta:',
-        error
-      )
+      logger.error('auth.sign_out_failed', { category: 'auth', operation: 'sign_out', code: error?.code, status: error?.status })
     } finally {
       await clearStorageCache()
 
