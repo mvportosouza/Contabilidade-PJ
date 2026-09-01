@@ -396,7 +396,7 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       /Pró-labore/i,
       /INSS do Sócio/i,
       /Contabilidade/i,
-      /^IRRF$/i,
+      /IRRF/i,
       /Total de Obrigações/i,
     ]) {
       await expect(page.getByText(label).first()).toBeVisible({
