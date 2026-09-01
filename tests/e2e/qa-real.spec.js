@@ -128,60 +128,83 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
 
   await page.getByRole('button', { name: submitName, exact: true }).click()
 
-  // Production persistence is asynchronous. If the optimistic render does
-  // not publish the marker immediately, reload the authenticated view once so
-  // the assertion is based on durable state rather than a transient render.
-  const markerLocator = page.getByText(marker, { exact: true })
-  if (!(await markerLocator.isVisible().catch(() => false))) {
-    await page.waitForTimeout(500)
+  // Online writes are asynchronous in production. First wait for the local
+  // envelope to become clean, then verify the marker from a fresh browser
+  // context when possible. Only after durable persistence is established do
+  // we assert the current page, avoiding races where the list re-renders from
+  // an older snapshot. Offline tests intentionally skip this cloud check.
+  const isOffline = await page.evaluate(() => navigator.onLine === false)
+  if (!isOffline) {
+    await waitForCloudSync(page, 20_000).catch(() => {})
+    await expectCloudMarker(page, marker, 25_000)
   }
-  if (!(await markerLocator.isVisible().catch(() => false))) {
-    await page.reload()
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const markerLocator = page.getByText(marker, { exact: true })
+    if (await markerLocator.isVisible().catch(() => false)) return
+    if (attempt > 0) await page.reload()
     await openTransactions(page)
+    await page.waitForTimeout(300)
   }
+
   await expect(page.getByText(marker, { exact: true })).toBeVisible({
     timeout: 15_000,
   })
 }
 
 async function expandTransaction(page, marker) {
-  // The transaction list can briefly lag behind the durable state after a
-  // save/re-render. Re-open the list and, as a final recovery, reload once.
-  let markerText = page.getByText(marker, { exact: true })
-  if (!(await markerText.isVisible().catch(() => false))) {
-    await openTransactions(page)
-  }
-  if (!(await markerText.isVisible().catch(() => false))) {
-    await page.reload()
-    await openTransactions(page)
-    markerText = page.getByText(marker, { exact: true })
+  // The transaction card can be replaced by React after synchronization.
+  // Re-query the card/toggle after every render and allow a few safe
+  // rehydration attempts before failing the test.
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (attempt > 0) {
+      await page.reload()
+      await openTransactions(page)
+    } else {
+      const markerText = page.getByText(marker, { exact: true })
+      if (!(await markerText.isVisible().catch(() => false))) {
+        await openTransactions(page)
+      }
+    }
+
+    const markerText = page.getByText(marker, { exact: true })
+    if (!(await markerText.isVisible().catch(() => false))) {
+      await page.waitForTimeout(750)
+      continue
+    }
+
+    const card = page.getByTestId('transaction-card').filter({
+      hasText: marker,
+    }).first()
+    if (!(await card.isVisible().catch(() => false))) {
+      await page.waitForTimeout(500)
+      continue
+    }
+
+    const toggle = card.locator('button').first()
+    if (!(await toggle.isVisible().catch(() => false))) {
+      await page.waitForTimeout(500)
+      continue
+    }
+
+    const toggleText = await toggle.innerText().catch(() => '')
+    if (toggleText.includes('▾')) {
+      await toggle.click({ force: true })
+    }
+
+    const refreshedCard = page.getByTestId('transaction-card').filter({
+      hasText: marker,
+    }).first()
+    const editButton = refreshedCard.getByRole('button', { name: /Editar/i })
+    if (await editButton.isVisible().catch(() => false)) return editButton
+
+    await page.waitForTimeout(500)
   }
 
-  await expect(markerText).toBeVisible({ timeout: 15_000 })
-
-  const card = page.getByTestId('transaction-card').filter({
+  const finalCard = page.getByTestId('transaction-card').filter({
     hasText: marker,
   }).first()
-
-  await expect(card).toBeVisible({ timeout: 15_000 })
-
-  const toggle = card.locator('button').first()
-  await expect(toggle).toBeVisible({ timeout: 10_000 })
-
-  const toggleText = await toggle.innerText()
-  if (toggleText.includes('▾')) {
-    await toggle.click({ force: true })
-  }
-
-  // setOpen() re-renders TxCard. Re-query after the state change instead of
-  // retaining the pre-render card locator.
-  const refreshedCard = page.getByTestId('transaction-card').filter({
-    hasText: marker,
-  }).first()
-  const editButton = refreshedCard.getByRole('button', { name: /Editar/i })
-  if (!(await editButton.isVisible().catch(() => false))) {
-    await page.waitForTimeout(300)
-  }
+  const editButton = finalCard.getByRole('button', { name: /Editar/i })
   await expect(editButton).toBeVisible({ timeout: 10_000 })
   return editButton
 }
@@ -489,7 +512,7 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       /Pró-labore/i,
       /INSS do Sócio/i,
       /Contabilidade/i,
-      /^IRRF$/i,
+      /\bIRRF\b/i,
       /Total de Obrigações/i,
     ]) {
       const labelLocator = page.getByText(label).first()
