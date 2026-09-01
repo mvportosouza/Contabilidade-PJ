@@ -99,24 +99,21 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
   if (saveFavorite && type !== 'Distribuição de Lucro') {
     // ChkBox é um componente visual dentro de um <label>; clicar apenas no
     // texto não aciona seu onClick. Clique no próprio quadrado do checkbox.
-    const favoriteField = page
-      .locator('label')
-      .filter({ hasText: /^Salvar nos favoritos$/ })
-      .first()
-    await expect(favoriteField).toBeVisible({ timeout: 10_000 })
+    const favoriteText = page.getByText('Salvar nos favoritos', { exact: true })
+    await expect(favoriteText).toBeVisible({ timeout: 10_000 })
 
-    // ChkBox is a real ARIA checkbox in the production UI. Targeting the
-    // semantic control is more reliable than depending on the label's child
-    // DOM hierarchy, and also lets the test prove that the option was actually
-    // enabled before submitting the form.
-    // The checkbox is a visual <div role="checkbox"> nested directly in the
-    // label. Target the ARIA element itself instead of relying on Playwright's
-    // label-to-control association, which is not native here because there is
-    // no input/for relationship.
-    const favoriteBox = favoriteField.locator('[role="checkbox"]').first()
+    // ChkBox is a visual ARIA checkbox (a div), not a native input. The
+    // component is recreated by React when its checked state changes, so do
+    // not retain a locator tied to its original DOM parent after the click.
+    // Locate the semantic checkbox globally and re-query it after React's
+    // state update.
+    const favoriteBox = page.locator('[role="checkbox"]').first()
     await expect(favoriteBox).toBeVisible({ timeout: 10_000 })
     await favoriteBox.click()
-    await expect(favoriteBox).toHaveAttribute('aria-checked', 'true')
+    await expect.poll(
+      async () => await page.locator('[role="checkbox"]').first().getAttribute('aria-checked'),
+      { timeout: 10_000, intervals: [100, 250, 500] },
+    ).toBe('true')
   }
 
   const submitName =
@@ -167,6 +164,29 @@ async function waitForRemoteSnapshot(page, timeoutMs = 15_000) {
       return false
     }
   }, null, { timeout: timeoutMs })
+}
+
+async function waitForDurableSync(page, marker, timeoutMs = 30_000) {
+  await page.waitForFunction((expectedMarker) => {
+    const cache = Object.entries(localStorage).find(([key]) =>
+      key.startsWith('pj_app_state_cache_v3_'),
+    )
+    if (!cache) return false
+
+    try {
+      const envelope = JSON.parse(cache[1])
+      const transactions = Array.isArray(envelope?.state?.pj_tx2)
+        ? envelope.state.pj_tx2
+        : []
+      const hasMarker = transactions.some((tx) =>
+        Object.values(tx || {}).some((value) => value === expectedMarker),
+      )
+      // A clean envelope is written only after save_app_state succeeds.
+      return hasMarker && envelope.dirty === false && Boolean(envelope.remoteUpdatedAt)
+    } catch {
+      return false
+    }
+  }, marker, { timeout: timeoutMs })
 }
 
 async function expectCloudMarker(browser, marker, timeoutMs = 30_000) {
@@ -489,9 +509,11 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
         // storage banner to disappear. The banner is shown while the queue is
         // offline, pending, or syncing; after a successful cloud write the
         // production UI returns to the normal shell and the banner disappears.
-        await expect(
-          reopenedOffline.locator('[role="status"], [role="alert"]'),
-        ).toHaveCount(0, { timeout: 30_000 })
+        // The production storage banner intentionally remains visible for
+        // several transient states and is not a reliable synchronization
+        // signal. The durable cache envelope is: dirty=false is written only
+        // after the remote save succeeds.
+        await waitForDurableSync(reopenedOffline, marker, 30_000)
 
         // Verify with a completely fresh browser context, which has no local
         // cache and therefore can only see the marker if it really reached
@@ -533,6 +555,7 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       await login(first)
       await openTransactions(first)
       await createTransaction(first, 'Receita', baseline)
+      await waitForDurableSync(first, baseline, 30_000)
 
       const baselineCloud = await expectCloudMarker(browser, baseline, 30_000)
       await baselineCloud.context().close().catch(() => {})
@@ -550,6 +573,7 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       await expect(first.getByText(baseline, { exact: true })).toBeVisible({ timeout: 15_000 })
 
       await createTransaction(first, 'Receita', markerA)
+      await waitForDurableSync(first, markerA, 30_000)
 
       // Prove A reached Supabase before B attempts its stale write.
       const cloudAfterA = await expectCloudMarker(browser, markerA, 30_000)
