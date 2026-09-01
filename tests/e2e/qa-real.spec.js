@@ -89,6 +89,10 @@ async function createTransaction(page, type, marker, value = '123,45', saveFavor
     await fieldControl(page, 'Descrição da Receita', 'select').selectOption({ index: 1 }).catch(() => {})
   } else if (type === 'Despesa') {
     await fieldControl(page, 'Tipo de Despesa *', 'select').selectOption({ index: 1 })
+    // Despesas exibem a categoria como nome do lançamento. O marcador de
+    // QA deve ir na observação/descrição, que é o campo persistido e visível
+    // no cartão da despesa.
+    await fieldControl(page, 'Observação', 'input').fill(marker)
   } else {
     await fieldControl(page, 'Descrição', 'input, textarea').fill(marker)
   }
@@ -368,13 +372,10 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
   test('1.2 dados — receita, favorito, edição, despesa, distribuição e exclusão', async ({ page }) => {
     await createTransaction(page, 'Receita', QA_MARKER, '123,45', true)
 
-    // saveFavs persists asynchronously and the app also hydrates its state
-    // asynchronously on first mount. Reload once after the save so this
-    // assertion is based on the durable favorites state, not a transient
-    // in-memory render that can still be replaced by the initial hydration.
-    await page.reload()
-    await expect(page.getByRole('button', { name: /^Sair$/i })).toBeVisible({ timeout: 15_000 })
-
+    // createTransaction awaits saveFavs(), so the current React state is
+    // already the authoritative result of the user action. Do not reload here:
+    // a full reload introduces an unrelated AuthGate hydration race into this
+    // test and can temporarily replace the just-saved favorites list.
     await page.getByRole('button', { name: 'Configurações' }).click()
     await page.getByText('⭐ Favoritos', { exact: true }).click()
     const favoritesHeading = page.getByRole('heading', { name: '⭐ Favoritos', exact: true })
