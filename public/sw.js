@@ -1,15 +1,18 @@
 /*
- * Service Worker — Lote O / versão 12
+ * Service Worker — Lote 10 / versão 13
  *
- * Objetivos:
- * - permitir reabertura real do PWA sem rede depois de um carregamento online;
- * - manter o HTML do app como fallback offline;
- * - cachear somente assets estáticos/build assets do mesmo domínio;
- * - nunca cachear APIs, Supabase ou respostas dinâmicas de dados financeiros;
- * - usar nomes de cache versionados para evitar mistura entre builds.
+ * PWA/offline hardening:
+ * - versioned cache with deterministic retirement of older app caches;
+ * - network-first navigation with offline fallback;
+ * - cache only same-origin app shell/build/static assets;
+ * - never cache API/Supabase responses;
+ * - quota/storage failures are non-fatal;
+ * - explicit cache reset/update messages for operational recovery;
+ * - activate/claim/skipWaiting supports controlled multi-tab updates.
  */
 
-const CACHE_NAME = 'contabilidade-pj-v12';
+const CACHE_NAME = 'contabilidade-pj-v13';
+const CACHE_PREFIX = 'contabilidade-pj-';
 
 const APP_SHELL = [
   '/',
@@ -35,18 +38,38 @@ const isPublicStaticAsset = (url) =>
 const isApiRequest = (url) =>
   url.pathname.startsWith('/api/');
 
-const cacheResponse = async (request, response) => {
-  if (!response || !response.ok) return response;
+async function putCache(request, response) {
+  if (!response?.ok) return response;
 
   try {
     const cache = await caches.open(CACHE_NAME);
     await cache.put(request, response.clone());
   } catch {
-    // Cache é apenas uma camada de resiliência; nunca deve quebrar a navegação.
+    // Quota/storage failures must never break the application.
   }
 
   return response;
-};
+}
+
+async function clearOldCaches() {
+  const keys = await caches.keys();
+
+  await Promise.all(
+    keys
+      .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+      .map((key) => caches.delete(key)),
+  );
+}
+
+async function clearAllAppCaches() {
+  const keys = await caches.keys();
+
+  await Promise.all(
+    keys
+      .filter((key) => key.startsWith(CACHE_PREFIX))
+      .map((key) => caches.delete(key)),
+  );
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -59,28 +82,23 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches
-      .keys()
-      .then((keys) =>
-        Promise.all(
-          keys
-            .filter((key) => key.startsWith('contabilidade-pj-') && key !== CACHE_NAME)
-            .map((key) => caches.delete(key)),
-        ),
-      )
+    clearOldCaches()
       .then(() => self.clients.claim()),
   );
 });
 
 self.addEventListener('message', (event) => {
-  if (event.data?.type !== 'CLEAR_CACHES') return
+  const type = event.data?.type;
 
-  event.waitUntil(
-    caches
-      .keys()
-      .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
-  )
-})
+  if (type === 'SKIP_WAITING') {
+    event.waitUntil(self.skipWaiting());
+    return;
+  }
+
+  if (type === 'CLEAR_CACHES') {
+    event.waitUntil(clearAllAppCaches());
+  }
+});
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
@@ -88,49 +106,32 @@ self.addEventListener('fetch', (event) => {
   if (!isSameOriginGet(event.request, url)) return;
   if (isApiRequest(url)) return;
 
-  /*
-   * Assets do build do Next são identificados por hashes e podem ser
-   * cacheados com segurança. Cache-first também permite que o PWA reabra
-   * depois de ser encerrado e sem conexão.
-   */
   if (isNextBuildAsset(url)) {
     event.respondWith(
       caches.match(event.request).then((cached) => {
         if (cached) return cached;
 
-        return fetch(event.request).then((response) =>
-          cacheResponse(event.request, response),
-        );
+        return fetch(event.request)
+          .then((response) => putCache(event.request, response));
       }),
     );
     return;
   }
 
-  /* Assets públicos do app: rede primeiro, cache como fallback/atualização. */
   if (isPublicStaticAsset(url)) {
     event.respondWith(
       fetch(event.request)
-        .then((response) => cacheResponse(event.request, response))
+        .then((response) => putCache(event.request, response))
         .catch(() => caches.match(event.request)),
     );
     return;
   }
 
-  /*
-   * Navegação: rede primeiro para receber o HTML do build atual.
-   * Se a rede estiver indisponível, usa o último HTML conhecido.
-   */
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request)
-        .then((response) => cacheResponse('/', response))
+        .then((response) => putCache(new Request('/'), response))
         .catch(() => caches.match('/')),
     );
-  }
-});
-
-self.addEventListener('message', (event) => {
-  if (event.data?.type === 'SKIP_WAITING') {
-    self.skipWaiting();
   }
 });
