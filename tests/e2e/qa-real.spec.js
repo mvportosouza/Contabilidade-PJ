@@ -154,11 +154,18 @@ async function expandTransaction(page, marker) {
     timeout: 10_000,
   })
 
-  await card.locator('button').first().click()
-  await expect(card.getByRole('button', { name: /Editar/i })).toBeVisible({
-    timeout: 10_000,
-  })
+  const editButton = card.getByRole('button', { name: /Editar/i })
+  if (!(await editButton.isVisible().catch(() => false))) {
+    await card.locator('button').first().click()
+  }
+  await expect(editButton).toBeVisible({ timeout: 10_000 })
   return card
+}
+
+async function waitForStorageIdle(page, timeoutMs = 15_000) {
+  await expect(
+    page.locator('[role="status"], [role="alert"]'),
+  ).toHaveCount(0, { timeout: timeoutMs })
 }
 
 async function deleteTransaction(page, marker) {
@@ -620,6 +627,11 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
       })
       await expect(second.getByText(markerB, { exact: true })).toHaveCount(0)
 
+      // Conflict resolution reloads the app and may briefly keep the storage
+      // banner above the transaction list while the resolved snapshot is
+      // being persisted. Wait for that overlay to leave the hit-test area
+      // before performing cleanup actions on the first device.
+      await waitForStorageIdle(first, 15_000)
       await deleteTransaction(first, markerA)
       await deleteTransaction(first, baseline)
     } finally {
