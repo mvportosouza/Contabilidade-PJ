@@ -163,9 +163,24 @@ async function expandTransaction(page, marker) {
 }
 
 async function waitForStorageIdle(page, timeoutMs = 15_000) {
-  await expect(
-    page.locator('[role="status"], [role="alert"]'),
-  ).toHaveCount(0, { timeout: timeoutMs })
+  // The storage banner is presentation state and can legitimately remain
+  // visible in a stale tab after another tab resolves a conflict.  It is
+  // therefore not a reliable synchronization barrier.  The durable cache
+  // envelope is authoritative: dirty=false is written only after the remote
+  // save succeeds, and remoteUpdatedAt identifies the committed version.
+  await page.waitForFunction(() => {
+    const cache = Object.entries(localStorage).find(([key]) =>
+      key.startsWith('pj_app_state_cache_v3_'),
+    )
+    if (!cache) return false
+
+    try {
+      const envelope = JSON.parse(cache[1])
+      return envelope?.dirty === false && Boolean(envelope?.remoteUpdatedAt)
+    } catch {
+      return false
+    }
+  }, null, { timeout: timeoutMs })
 }
 
 async function deleteTransaction(page, marker) {
