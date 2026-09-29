@@ -1,13 +1,22 @@
-import { MS } from "../AppUI";
+import { MS, MoneyIn } from "../AppUI";
 import { TxCard } from "../Transactions/TransactionCard";
 
-export function LancTab({monthTxs,receitas,despesas,resultado,month,year,MONTHS,C,fmtBRL,openNew,openEdit,delTx,dividendSummary}){
+export function LancTab({monthTxs,receitas,despesas,resultado,month,year,MONTHS,C,fmtBRL,saldoDia01In,setSaldoDia01In,commitSaldoDia01,openNew,openEdit,delTx,dividendSummary}){
   return(<>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
       <button onClick={()=>openNew("receita")} style={{background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,border:"none",borderRadius:16,padding:"16px",color:"white",fontSize:15,fontFamily:"inherit",fontWeight:"700",cursor:"pointer",boxShadow:"0 4px 18px rgba(15,30,53,0.3)"}}>💰 + Receita</button>
       <button onClick={()=>openNew("despesa")} style={{background:"linear-gradient(135deg,#962d22,#C0392B)",border:"none",borderRadius:16,padding:"16px",color:"white",fontSize:15,fontFamily:"inherit",fontWeight:"700",cursor:"pointer",boxShadow:"0 4px 18px rgba(192,57,43,0.3)"}}>💸 + Despesa</button>
     </div>
     <button onClick={()=>openNew("distribuicao")} style={{width:"100%",background:`linear-gradient(135deg,${C.gold},#B89454)`,border:"none",borderRadius:16,padding:"14px 16px",marginBottom:14,color:"white",fontSize:14,fontFamily:"inherit",fontWeight:"700",cursor:"pointer",boxShadow:"0 4px 18px rgba(200,169,110,0.25)"}}>💰 + Distribuição de Lucro</button>
+    <div style={{background:"white",borderRadius:14,padding:"12px 16px",marginBottom:14,boxShadow:"0 1px 8px rgba(0,0,0,0.05)",border:`1px solid ${C.border}`}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:9}}>
+        <div>
+          <p style={{margin:0,fontSize:10,color:C.muted,letterSpacing:1.7,textTransform:"uppercase"}}>Saldo dia 01</p>
+          <p style={{margin:"4px 0 0",fontSize:10,color:C.muted}}>{MONTHS[month]} {year} · saldo bancário de abertura</p>
+        </div>
+      </div>
+      <MoneyIn value={saldoDia01In} onChange={setSaldoDia01In} onBlur={commitSaldoDia01} placeholder="0,00"/>
+    </div>
     <div style={{background:"white",borderRadius:16,padding:"14px 15px",marginBottom:14,boxShadow:"0 1px 8px rgba(0,0,0,0.05)",border:`1px solid ${C.border}`}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
         <div>
