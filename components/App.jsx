@@ -41,6 +41,8 @@ function App() {
   const [ctbMap,setCtbMap]=useState({});
   const [irrfMap,setIrrfMap]=useState({});
   const [pfOtherIncomeMap,setPfOtherIncomeMap]=useState({});
+  const [saldoDia01Map,setSaldoDia01Map]=useState({});
+  const [saldoDia01In,setSaldoDia01In]=useState("");
   const [plIn,setPlIn]=useState("");
   const [ctbIn,setCtbIn]=useState("");
   const [irrfIn,setIrrfIn]=useState("");
@@ -78,6 +80,7 @@ function App() {
       const ct=await sGet("pj_ctb")||{};
       const storedIrrf=await sGet("pj_irrf")||{};
       const pfOther=await sGet("pj_pf_outros")||{};
+      const saldoMap=await sGet("pj_saldos")||{};
       // IRRF manual só existe quando há um valor efetivamente informado.
       // Zeros antigos não podem sobrescrever o cálculo automático de 2026.
       const irrf=Object.fromEntries(
@@ -95,7 +98,7 @@ function App() {
       if (t.length > 0 && JSON.stringify(seededPL) !== JSON.stringify(pm)) {
         await sSet("pj_plm", seededPL);
       }
-      setFavs(fv); setCtbMap(ct); setIrrfMap(irrf); setPfOtherIncomeMap(pfOther); setPlManual(seededPL);
+      setFavs(fv); setCtbMap(ct); setIrrfMap(irrf); setPfOtherIncomeMap(pfOther); setSaldoDia01Map(saldoMap); setPlManual(seededPL);
       const updated=await cascadePL(t,seededPL);
       setTxs(t); setPlMap(updated);
        hydratedRef.current = true;
@@ -113,6 +116,12 @@ function App() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setPlIn(storedMoneyInput(value));
   }, [plKey, plMap, plManual]);
+
+  useEffect(() => {
+    // Sincroniza o saldo bancário informado para o dia 01 do mês selecionado.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSaldoDia01In(storedMoneyInput(saldoDia01Map[plKey]));
+  }, [plKey, saldoDia01Map]);
 
   useEffect(() => {
     // Necessário para sincronizar o campo de entrada com o mês selecionado.
@@ -180,9 +189,11 @@ function App() {
 
   const totalObrig = DAS + INSS + CTB + IRRFef;
 
-  // Saldo atual é estritamente do mês selecionado, sem carregar o mês anterior.
-  // Distribuição de lucros não é despesa e, portanto, não reduz este resultado.
-  const saldo = receitas - despesas;
+  // Saldo atual parte do saldo bancário informado no dia 01 do mês selecionado
+  // e soma o resultado dos lançamentos do próprio mês. O saldo informado é
+  // apenas uma base de abertura e não é tratado como receita.
+  const saldoDia01 = Math.max(0, Number(saldoDia01Map?.[plKey]) || 0);
+  const saldo = saldoDia01 + receitas - despesas;
 
   const allYears = [...new Set([
     year,
@@ -193,6 +204,7 @@ function App() {
     ...Object.keys(ACCOUNTING_PL_BY_MONTH).map(k => Number(String(k).slice(0, 4))).filter(Number.isFinite),
     ...Object.keys(ctbMap || {}).map(k => Number(String(k).slice(0, 4))).filter(Number.isFinite),
     ...Object.keys(irrfMap || {}).map(k => Number(String(k).slice(0, 4))).filter(Number.isFinite),
+    ...Object.keys(saldoDia01Map || {}).map(k => Number(String(k).slice(0, 4))).filter(Number.isFinite),
     ...Object.keys(pfOtherIncomeMap || {}).map(k => Number(k)).filter(Number.isFinite),
   ])].sort((a, b) => b - a);
 
@@ -208,6 +220,15 @@ function App() {
   const saveCtb=async d=>{setCtbMap(d);await sSet("pj_ctb",d);};
   const saveIrrf=async d=>{setIrrfMap(d);await sSet("pj_irrf",d);};
   const savePfOtherIncome=async d=>{setPfOtherIncomeMap(d);await sSet("pj_pf_outros",d);};
+  const saveSaldoDia01=async d=>{setSaldoDia01Map(d);await sSet("pj_saldos",d);};
+  const commitSaldoDia01=async()=>{
+    const next={...saldoDia01Map};
+    const v=parseBRL(saldoDia01In);
+    if(v>0) next[plKey]=v;
+    else delete next[plKey];
+    await saveSaldoDia01(next);
+    notify(v>0 ? "Saldo do dia 01 salvo!" : "Saldo do dia 01 removido.");
+  };
   const commitIrrf=async()=>{
     const v=parseBRL(irrfIn);
     const next={...irrfMap};
@@ -478,6 +499,7 @@ function App() {
     ctbMap,
     irrfMap,
     pfOtherIncomeMap,
+    saldoMap:saldoDia01Map,
     exportedAt:new Date().toISOString(),
   });
 
@@ -544,7 +566,7 @@ function App() {
       // Strict validation happens before any write, including type checks,
       // version/schema checks, unknown-field checks and collection limits.
       const d=normalizeBackup(backupData);
-      const {txs:txData,favs:favData,plMap:plData,plManual:manualData,ctbMap:ctbData,irrfMap:irrfData,pfOtherIncomeMap:pfOtherData}=d;
+      const {txs:txData,favs:favData,plMap:plData,plManual:manualData,ctbMap:ctbData,irrfMap:irrfData,pfOtherIncomeMap:pfOtherData,saldoMap:saldoData}=d;
       const up=await cascadePL(txData,manualData);
 
       // One storage transaction replaces the complete application state.
@@ -557,12 +579,14 @@ function App() {
         pj_ctb:ctbData,
         pj_irrf:irrfData,
         pj_pf_outros:pfOtherData,
+        pj_saldos:saldoData,
       });
 
       setFavs(favData);
       setCtbMap(ctbData);
       setIrrfMap(irrfData);
       setPfOtherIncomeMap(pfOtherData);
+      setSaldoDia01Map(saldoData);
       setPlManual(manualData);
       setTxs(txData);
       setPlMap(up);
@@ -655,6 +679,7 @@ function App() {
           <LancTab
             monthTxs={monthTxs} receitas={receitas} despesas={despesas} resultado={resultado}
             month={month} year={year} MONTHS={MONTHS} C={C} fmtBRL={fmtMoney}
+            saldoDia01In={saldoDia01In} setSaldoDia01In={setSaldoDia01In} commitSaldoDia01={commitSaldoDia01}
             openNew={openNew} openEdit={openEdit} delTx={delTx}
             dividendSummary={dividendSummary}
           />
