@@ -16,7 +16,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "recharts": "^3.10.1",
-    "react-is": "^19.2.8"
+    "react-is": "^19.3.0"
   },
   "devDependencies": {
     "eslint": "^9.39.4",
