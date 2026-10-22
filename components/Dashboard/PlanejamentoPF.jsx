@@ -35,12 +35,31 @@ export function PlanejamentoPF({ year, month, C, txs = [], plMap = {}, irrfMap =
   const pgblLimit = taxableIncome * .12;
   const eligiblePgbl = Math.min(pgblTotal,pgblLimit);
   const medicalNet = medical(periodItems);
-  // Projeção indicativa: estima o IRRF mensal após as deduções registradas, sem substituir a apuração oficial anual.
+  // Estimativa fiscal separa cálculo mensal de ajuste anual. Para o ano-calendário 2026,
+  // aplica a tabela anual e a redução criada pela Lei 15.270/2025; não trata despesas médicas
+  // como dedução automática quando não forem elegíveis/comprovadas.
+  const annualMedical = medical(yearItems);
+  const annualEducation = Math.min(3561.50, total(yearItems.filter(x => x.categoria === "Educação")));
+  const annualLegalDeductions = inssTotal + eligiblePgbl + annualMedical + annualEducation;
+  const annualSimplifiedDeduction = 17640;
+  const annualDeductionUsed = Math.max(annualLegalDeductions, annualSimplifiedDeduction);
+  const annualTaxBase = Math.max(0, taxableIncome - annualDeductionUsed);
+  const annualBrackets = [
+    {limite:29145.60, aliquota:0, deducao:0},
+    {limite:33919.80, aliquota:.075, deducao:2185.92},
+    {limite:45012.60, aliquota:.15, deducao:4729.91},
+    {limite:55976.16, aliquota:.225, deducao:8105.85},
+    {limite:Infinity, aliquota:.275, deducao:10904.66},
+  ];
+  const annualBracket = annualBrackets.find(b => annualTaxBase <= b.limite) || annualBrackets[annualBrackets.length-1];
+  const annualNormalTax = Math.max(0, annualTaxBase * annualBracket.aliquota - annualBracket.deducao);
+  const annualReduction = taxableIncome <= 60000 ? annualNormalTax : taxableIncome <= 88200 ? Math.max(0, 8429.73 - .095575 * taxableIncome) : 0;
+  const annualTaxDue = Math.max(0, annualNormalTax - annualReduction);
   const estimateMonthTax = key => {
     const pl = Math.max(0, Number(plMap?.[key]) || 0);
     const inss = typeof calcINSS === "function" ? Math.max(0, Number(calcINSS(pl)) || 0) : pl * .11;
-    const manual = Number(irrfMap?.[key]);
-    const withheld = Number.isFinite(manual) && manual > 0 ? manual : (typeof calcIRRF === "function" ? Math.max(0, Number(calcIRRF(pl, {inss})?.valor || 0)) : 0);
+    const hasManual = Object.prototype.hasOwnProperty.call(irrfMap || {}, key) && Number.isFinite(Number(irrfMap[key]));
+    const withheld = hasManual ? Math.max(0, Number(irrfMap[key]) || 0) : (typeof calcIRRF === "function" ? Math.max(0, Number(calcIRRF(pl, {inss})?.valor || 0)) : 0);
     const monthRows = yearItems.filter(x => String(x.data||"").slice(0,7) === key);
     const monthPgbl = total(monthRows.filter(x => x.categoria === "Previdência PGBL"));
     const monthMedical = medical(monthRows);
@@ -49,13 +68,15 @@ export function PlanejamentoPF({ year, month, C, txs = [], plMap = {}, irrfMap =
     const estimatedTax = typeof calcIRRF === "function" ? Math.max(0, Number(calcIRRF(base, {inss:0})?.valor || 0)) : 0;
     return {withheld, estimatedTax, balance: withheld - estimatedTax};
   };
-  const refundProjection = monthKeys.reduce((sum,key,i)=>{const result=estimateMonthTax(key);return sum+result.balance;},0);
+  const refundProjection = view === "anual"
+    ? irrfTotal - annualTaxDue
+    : monthKeys.reduce((sum,key)=>sum+estimateMonthTax(key).balance,0);
   const currencyInput = (label,value) => <Field label={label}><input value={fmtBRL(value)} readOnly aria-readonly="true" style={{...inputStyle,background:"#F7F4EF",color:C.navyMid}}/></Field>;
   return <div style={{display:"grid",gap:14}}>
     <div style={{background:"linear-gradient(135deg,#0F1E35,#1A3055)",borderRadius:18,padding:18,color:"white"}}><p style={{margin:0,fontSize:10,letterSpacing:2,color:"#C8A96E"}}>PLANEJAMENTO TRIBUTÁRIO</p><h2 style={{fontSize:21,fontWeight:"normal",margin:"7px 0"}}>Pessoa Física · IRPF</h2><p style={{margin:0,fontSize:12,color:"#E0D8CE"}}>Controle separado do CNPJ · {year}</p></div>
     <div style={{display:"flex",gap:8}}><button onClick={()=>setView("mensal")} style={{flex:1,padding:11,borderRadius:12,border:`1px solid ${view==="mensal"?C.navyMid:C.border}`,background:view==="mensal"?C.navyLight:"white",color:C.navyMid,fontFamily:"inherit"}}>Visão mensal</button><button onClick={()=>setView("anual")} style={{flex:1,padding:11,borderRadius:12,border:`1px solid ${view==="anual"?C.navyMid:C.border}`,background:view==="anual"?C.navyLight:"white",color:C.navyMid,fontFamily:"inherit"}}>Visão anual</button></div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><Card><p style={{margin:0,fontSize:10,color:C.muted}}>DESPESAS MÉDICAS LÍQUIDAS · {view==="mensal"?"MÊS":"ANO"}</p><p style={{margin:"7px 0 0",fontSize:17,fontWeight:"bold",color:C.navyMid}}>{fmtBRL(medicalNet)}</p></Card><Card><p style={{margin:0,fontSize:10,color:C.muted}}>PGBL CADASTRADO · {view==="mensal"?"MÊS":"ANO"}</p><p style={{margin:"7px 0 0",fontSize:17,fontWeight:"bold",color:C.gold}}>{fmtBRL(pgblTotal)}</p></Card></div>
-    <Card><h3 style={{margin:"0 0 12px",fontSize:16,color:C.navy}}>Planejamento {view==="mensal"?"mensal":"anual"} do IRPF · {periodLabel}</h3>{currencyInput(`Pró-labore / rendimentos PJ (${view==="mensal"?"mês":"ano"})`,plTotal)}{currencyInput(`Previdência oficial / INSS (${view==="mensal"?"mês":"ano"})`,inssTotal)}{currencyInput(`IRRF / imposto já recolhido (${view==="mensal"?"mês":"ano"})`,irrfTotal)}{currencyInput(`Outros rendimentos PF (${view==="mensal"?"mês":"ano"})`,otherIncome)}<div style={{background:"#F8F1E5",borderRadius:12,padding:12,marginBottom:12}}><p style={{margin:0,fontSize:12,color:C.navy}}>Limite indicativo de dedução PGBL (12%): <b>{fmtBRL(pgblLimit)}</b></p><p style={{margin:"5px 0 0",fontSize:12,color:C.navy}}>Dedução potencial estimada: <b>{fmtBRL(eligiblePgbl)}</b></p><div style={{borderTop:`1px solid ${C.border}`,marginTop:10,paddingTop:10}}><p style={{margin:0,fontSize:12,color:C.navy}}>Restituição potencial estimada / saldo de IRRF</p><p style={{margin:"5px 0 0",fontSize:21,fontWeight:"bold",color:refundProjection>=0?C.navyMid:C.red}}>{refundProjection>=0?fmtBRL(refundProjection):`Imposto potencial a pagar: ${fmtBRL(Math.abs(refundProjection))}`}</p></div><p style={{margin:"7px 0 0",fontSize:10,color:C.muted,lineHeight:1.5}}>Estimativa simplificada para acompanhamento, não é cálculo oficial da restituição. O resultado compara o IRRF estimado/recolhido com uma estimativa mensal após deduções cadastradas; pode divergir da declaração anual, da tabela vigente, do modelo completo ou simplificado e de outras fontes de renda. Despesas só devem ser consideradas dedutíveis quando legalmente elegíveis e comprovadas.</p></div></Card>
+    <Card><h3 style={{margin:"0 0 12px",fontSize:16,color:C.navy}}>Planejamento {view==="mensal"?"mensal":"anual"} do IRPF · {periodLabel}</h3>{currencyInput(`Pró-labore / rendimentos PJ (${view==="mensal"?"mês":"ano"})`,plTotal)}{currencyInput(`Previdência oficial / INSS (${view==="mensal"?"mês":"ano"})`,inssTotal)}{currencyInput(`IRRF / imposto já recolhido (${view==="mensal"?"mês":"ano"})`,irrfTotal)}{currencyInput(`Outros rendimentos PF (${view==="mensal"?"mês":"ano"})`,otherIncome)}<div style={{background:"#F8F1E5",borderRadius:12,padding:12,marginBottom:12}}><p style={{margin:0,fontSize:12,color:C.navy}}>Limite indicativo de dedução PGBL (12%): <b>{fmtBRL(pgblLimit)}</b></p><p style={{margin:"5px 0 0",fontSize:12,color:C.navy}}>Dedução potencial estimada: <b>{fmtBRL(eligiblePgbl)}</b></p>{view === "anual" && <><p style={{margin:"5px 0 0",fontSize:12,color:C.navy}}>Deduções legais estimadas: <b>{fmtBRL(annualLegalDeductions)}</b></p><p style={{margin:"5px 0 0",fontSize:12,color:C.navy}}>Desconto utilizado na simulação: <b>{annualDeductionUsed === annualSimplifiedDeduction ? "Simplificado" : "Deduções legais"} · {fmtBRL(annualDeductionUsed)}</b></p><p style={{margin:"5px 0 0",fontSize:12,color:C.navy}}>Imposto anual estimado após redução de 2026: <b>{fmtBRL(annualTaxDue)}</b></p></>}<div style={{borderTop:`1px solid ${C.border}`,marginTop:10,paddingTop:10}}><p style={{margin:0,fontSize:12,color:C.navy}}>Restituição potencial estimada / saldo de IRRF</p><p style={{margin:"5px 0 0",fontSize:21,fontWeight:"bold",color:refundProjection>=0?C.navyMid:C.red}}>{refundProjection>=0?fmtBRL(refundProjection):`Imposto potencial a pagar: ${fmtBRL(Math.abs(refundProjection))}`}</p></div><p style={{margin:"7px 0 0",fontSize:10,color:C.muted,lineHeight:1.5}}>Estimativa para acompanhamento, não é cálculo oficial da restituição. Na visão anual aplica a tabela anual do ano-calendário selecionado, a redução de 2026 quando aplicável e compara deduções legais estimadas com o desconto simplificado anual. Para 2026, rendimentos tributáveis sujeitos ao ajuste anual de até R$ 60.000 podem resultar em imposto devido zero pela redução anual. Confirme rendimentos, retenções, elegibilidade e comprovantes antes de tomar decisões.</p></div></Card>
     <Card><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:12}}><div><h3 style={{margin:0,fontSize:16,color:C.navy}}>Cadastro de Despesas Dedutíveis</h3><p style={{margin:"4px 0 0",fontSize:11,color:C.muted}}>{view==="mensal"?`Registros de ${String(month+1).padStart(2,"0")}/${year}`:`Registros de ${year}`}</p></div><button onClick={()=>{setForm(blank());setEditing(false);setShowForm(true)}} style={{border:0,borderRadius:11,padding:"10px 12px",background:C.navyMid,color:"white",fontFamily:"inherit",fontWeight:"bold",whiteSpace:"nowrap"}}>+ Cadastrar</button></div>
       <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Pesquisar despesa..." style={{...inputStyle,marginBottom:12}}/>
       <p style={{fontSize:11,color:C.muted,margin:"0 0 10px"}}>{displayed.length} registro(s) · Total: <b>{fmtBRL(total(periodItems))}</b></p>
