@@ -678,7 +678,7 @@ function App() {
         {/* ── LANÇAMENTOS ── */}
         {tab==="lancamentos" && (
           <LancTab
-            monthTxs={monthTxs} receitas={receitas} despesas={despesas} resultado={resultado}
+            monthTxs={monthTxs} allTxs={txs} receitas={receitas} despesas={despesas} resultado={resultado}
             month={month} year={year} MONTHS={MONTHS} C={C} fmtBRL={fmtMoney}
             saldoDia01In={saldoDia01In} setSaldoDia01In={setSaldoDia01In} commitSaldoDia01={commitSaldoDia01}
             openNew={openNew} openEdit={openEdit} delTx={delTx}
@@ -691,7 +691,7 @@ function App() {
           <AnualTab txs={txs} plMap={effectivePlMap} irrfMap={irrfMap} year={year} C={C} fmtBRL={fmtMoney} calcIRRF={calcIRRF} calcTributacao={calcTributacao} calcINSS={calcINSS} pfOtherIncomeMap={pfOtherIncomeMap} savePfOtherIncome={savePfOtherIncome}/>
         )}
 
-        {tab==="planejamentoPF" && <PlanejamentoPF year={year} month={month} C={C} />}
+        {tab==="planejamentoPF" && <PlanejamentoPF year={year} month={month} C={C} txs={txs} plMap={effectivePlMap} irrfMap={irrfMap} pfOtherIncomeMap={pfOtherIncomeMap} calcINSS={calcINSS} calcIRRF={calcIRRF} />}
 
         {tab==="estatistica" && (
           <StatTab
