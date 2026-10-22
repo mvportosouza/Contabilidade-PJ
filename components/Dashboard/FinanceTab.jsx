@@ -7,8 +7,14 @@ export function LancTab({monthTxs,allTxs,receitas,despesas,resultado,month,year,
   const [showFilters,setShowFilters]=useState(false);
   const [period,setPeriod]=useState("mes");
   const [kind,setKind]=useState("todos");
-  const baseTxs=period==="todos"?(allTxs||monthTxs):period==="ano"?(allTxs||monthTxs).filter(t=>new Date(t.data+"T12:00:00").getFullYear()===year):monthTxs;
-  const filteredTxs=baseTxs.filter(t=>(kind==="todos"||t.tipo===kind)&&`${t.nome||""} ${t.especialidade||""} ${t.descricao||""} ${t.categoria||""} ${t.data||""}`.toLowerCase().includes(search.toLowerCase()));
+  const txDate = value => {
+    if (!value) return null;
+    const raw = String(value);
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? new Date(`${raw}T12:00:00`) : new Date(raw);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+  const baseTxs=period==="todos"?(allTxs||monthTxs):period==="ano"?(allTxs||monthTxs).filter(t=>txDate(t.data)?.getFullYear()===Number(year)):(allTxs||monthTxs).filter(t=>{const d=txDate(t.data);return d && d.getFullYear()===Number(year) && d.getMonth()===Number(month);});
+  const filteredTxs=baseTxs.filter(t=>(kind==="todos"||(kind==="distribuicao"?t.tipo==="distribuicao":t.tipo===kind))&&`${t.nome||""} ${t.especialidade||""} ${t.descricao||""} ${t.categoria||""} ${t.data||""}`.toLowerCase().includes(search.toLowerCase()));
   return(<>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
       <button onClick={()=>openNew("receita")} style={{background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,border:"none",borderRadius:16,padding:"16px",color:"white",fontSize:15,fontFamily:"inherit",fontWeight:"700",cursor:"pointer",boxShadow:"0 4px 18px rgba(15,30,53,0.3)"}}>💰 + Receita</button>
