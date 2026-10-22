@@ -21,6 +21,7 @@ export function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributaca
   const MS=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
   const [taxDetail,setTaxDetail]=useState(null);
   const [otherModal,setOtherModal]=useState(false);
+  const [chartInfo,setChartInfo]=useState(null);
   const [otherDraft,setOtherDraft]=useState({descricao:"",valor:"",irrf:"",irrfExclusive:"",incluirBase:true,tributavel:true});
   const data=getAnnualStatistics(txs,plMap,irrfMap,year,calcIRRF,calcTributacao)
     .map((row,i)=>({...row,mes:MS[i]}));
@@ -85,6 +86,23 @@ export function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributaca
     });
   };
 
+  const chartExplanations={
+    receita:"Soma das receitas registradas em cada mês do ano selecionado. O total exibido corresponde à soma dos meses considerados; a média é o total dividido pela quantidade de meses ativos.",
+    despesa:"Soma das despesas registradas em cada mês do ano selecionado. O total considera os lançamentos classificados como despesa; a média considera os meses ativos.",
+    lucro:"Resultado mensal calculado como receitas menos despesas. O total anual soma os resultados dos meses considerados; pode variar conforme a classificação dos lançamentos.",
+    impostos:"Soma dos tributos registrados/calculados para o mês: DAS, INSS e IRRF PF conforme os dados disponíveis. Toque numa barra para ver a composição daquele mês.",
+    pl:"Soma dos valores de pró-labore informados para os meses do ano selecionado.",
+    inss:"Soma das contribuições ao INSS associadas ao pró-labore em cada mês, conforme o cálculo fiscal e os dados do aplicativo.",
+    irrf:"Soma do IRRF da pessoa física registrado ou estimado para os meses do ano. Valores estimados podem diferir do efetivamente retido.",
+    distribuicao:"Soma das distribuições de lucros registradas no ano selecionado.",
+    margem:"Margem líquida calculada pela relação entre lucro líquido e receita, expressa em percentual. É uma média dos percentuais mensais exibidos.",
+    mediaReceitaAcumulada:"Média mensal acumulada das receitas até cada mês, usada para acompanhar a evolução do faturamento médio ao longo do ano.",
+    melhorMes:"Destaca o mês com maior lucro entre os meses com dados no ano selecionado.",
+    piorMes:"Destaca o mês com menor lucro entre os meses com dados no ano selecionado.",
+    evolucao:"Mostra a variação da receita em relação ao mês anterior. O primeiro mês não possui mês anterior e é representado como zero.",
+    combinado:"Compara receita, despesa e lucro por mês. As linhas representam médias móveis de até três meses para cada indicador."
+  };
+
   const charts=[
     {label:"Receita total",key:"receita",color:C.navyMid,format:"money"},
     {label:"Despesas totais",key:"despesa",color:C.red,format:"money"},
@@ -125,7 +143,7 @@ export function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributaca
     return (
       <div key={ch.key} style={{background:"white",borderRadius:18,padding:"18px",marginBottom:12,boxShadow:"0 2px 16px rgba(0,0,0,0.06)"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
-          <p style={{margin:0,fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase"}}>{ch.label}</p>
+          <button type="button" onClick={()=>setChartInfo({title:ch.label,description:chartExplanations[ch.key]||"Indicador calculado a partir dos lançamentos e dados fiscais registrados no aplicativo para o período selecionado."})} aria-label={`Explicação de ${ch.label}`} style={{margin:0,padding:0,border:0,background:"transparent",fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase",textAlign:"left",cursor:"pointer",fontFamily:"inherit",textDecoration:"underline",textUnderlineOffset:3}}>{ch.label} ⓘ</button>
           <div style={{textAlign:"right"}}>
             <p style={{margin:0,fontSize:14,fontWeight:"bold",color:ch.color}}>
               {headlineValue}
@@ -244,7 +262,7 @@ export function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributaca
     {charts.map(renderChart)}
     <div style={{background:"white",borderRadius:18,padding:"18px",marginBottom:12,boxShadow:"0 2px 16px rgba(0,0,0,0.06)"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
-        <p style={{margin:0,fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase"}}>Receita × Despesa × Lucro</p>
+        <button type="button" onClick={()=>setChartInfo({title:"Receita × Despesa × Lucro",description:chartExplanations.combinado})} style={{margin:0,padding:0,border:0,background:"transparent",fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase",textAlign:"left",cursor:"pointer",fontFamily:"inherit",textDecoration:"underline",textUnderlineOffset:3}}>Receita × Despesa × Lucro ⓘ</button>
         <p style={{margin:0,fontSize:14,fontWeight:"bold",color:C.navyMid}}>{fmtBRL(data.reduce((s,d)=>s+d.lucro,0))}</p>
       </div>
       <ResponsiveContainer width="100%" height={200}>
@@ -266,6 +284,16 @@ export function AnualTab({txs,plMap,irrfMap,year,C,fmtBRL,calcIRRF,calcTributaca
          </ComposedChart>
        </ResponsiveContainer>
      </div>
+
+    {chartInfo && (
+      <Modal onClose={()=>setChartInfo(null)}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:12}}>
+          <div><SmLabel>Como este gráfico é calculado</SmLabel><p style={{margin:"5px 0 0",fontSize:18,fontWeight:"bold",color:C.navyMid}}>{chartInfo.title}</p></div>
+          <CloseBtn onClick={()=>setChartInfo(null)}/>
+        </div>
+        <p style={{margin:0,fontSize:13,lineHeight:1.6,color:C.text}}>{chartInfo.description}</p>
+      </Modal>
+    )}
 
     {otherModal && (
       <Modal onClose={()=>setOtherModal(false)}>

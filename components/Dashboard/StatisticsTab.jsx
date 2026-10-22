@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { generateMonthlyReportPdf } from "../../lib/pdf";
 import { PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer } from "recharts";
 import { getMonthlyStatistics } from "../../lib/statistics";
@@ -5,6 +6,7 @@ import { ReportButton } from "../Reports/ReportButton";
 import { Card, SmLabel } from "../AppUI";
 
 export function StatTab({monthTxs,receitas,despesas,month,year,MONTHS,C,fmtV,setDrillModal,fmtBRL,DAS,INSS,IRRF,CTB,PLef}){
+  const [chartInfo,setChartInfo]=useState(null);
   const stats=getMonthlyStatistics(monthTxs);
   const recMes=stats.receitas;
   const ECOLS={"Endodontia":C.navyMid,"Ortodontia":C.gold,"Outros":C.muted};
@@ -23,7 +25,8 @@ export function StatTab({monthTxs,receitas,despesas,month,year,MONTHS,C,fmtV,set
 
     {/* Receita por Clínica por Especialidade */}
     <Card style={{marginBottom:12}}>
-      <SmLabel style={{marginBottom:14}}>Receita por Clínica</SmLabel>
+      <button type="button" onClick={()=>setChartInfo(chartInfo==="clinica"?null:"clinica")} style={{display:"block",margin:0,padding:0,border:0,background:"transparent",fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase",textAlign:"left",cursor:"pointer",fontFamily:"inherit",textDecoration:"underline",textUnderlineOffset:3}}>Receita por Clínica ⓘ</button>
+      {chartInfo==="clinica" && <p style={{margin:"8px 0 14px",fontSize:12,lineHeight:1.5,color:C.text}}>Agrupa as receitas do mês por clínica e especialidade. As barras horizontais indicam a participação de cada clínica no total de receitas daquela especialidade.</p>}
       {recMes.length===0?<p style={{textAlign:"center",color:"#CCC",fontSize:13,padding:"20px 0"}}>Nenhuma receita neste mês</p>
       :["Endodontia","Ortodontia","Outros"].map(esp=>{
         const items=esp==="Outros"?recMes.filter(t=>!t.especialidade||t.especialidade===""):recMes.filter(t=>t.especialidade===esp);
@@ -62,7 +65,8 @@ export function StatTab({monthTxs,receitas,despesas,month,year,MONTHS,C,fmtV,set
       if(tot===0)return null;
       return(
         <Card style={{marginBottom:12}}>
-          <SmLabel style={{marginBottom:4}}>Receita por Especialidade</SmLabel>
+          <button type="button" onClick={()=>setChartInfo(chartInfo==="especialidade"?null:"especialidade")} style={{display:"block",margin:0,padding:0,border:0,background:"transparent",fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase",textAlign:"left",cursor:"pointer",fontFamily:"inherit",textDecoration:"underline",textUnderlineOffset:3}}>Receita por Especialidade ⓘ</button>
+          {chartInfo==="especialidade" && <p style={{margin:"8px 0",fontSize:12,lineHeight:1.5,color:C.text}}>Distribui a receita do mês selecionado entre Endodontia, Ortodontia e Outros. Os valores são somados a partir dos lançamentos de receita classificados em cada especialidade; os percentuais representam a participação no total.</p>}
           <p style={{margin:"2px 0 14px",fontSize:11,color:"#BBB"}}>{MONTHS[month]} {year} · toque para detalhar</p>
           <ResponsiveContainer width="100%" height={200}>
             <PieChart><Pie data={data} cx="50%" cy="50%" outerRadius={75} dataKey="value" label={({percent})=>`${(percent*100).toFixed(0)}%`} labelLine={false} onClick={e=>setDrillModal({title:e.name,items:e.name==="Outros"?recMes.filter(t=>!t.especialidade||t.especialidade===""):recMes.filter(t=>t.especialidade===e.name)})}>
@@ -86,7 +90,8 @@ export function StatTab({monthTxs,receitas,despesas,month,year,MONTHS,C,fmtV,set
       if(tot===0)return null;
       return(
         <Card>
-          <SmLabel style={{marginBottom:4}}>Receitas vs Despesas</SmLabel>
+          <button type="button" onClick={()=>setChartInfo(chartInfo==="comparativo"?null:"comparativo")} style={{display:"block",margin:0,padding:0,border:0,background:"transparent",fontSize:10,color:C.muted,letterSpacing:2,textTransform:"uppercase",textAlign:"left",cursor:"pointer",fontFamily:"inherit",textDecoration:"underline",textUnderlineOffset:3}}>Receitas vs Despesas ⓘ</button>
+          {chartInfo==="comparativo" && <p style={{margin:"8px 0",fontSize:12,lineHeight:1.5,color:C.text}}>Compara o total de receitas com o total de despesas no mês selecionado. Cada fatia mostra o valor e sua proporção em relação à soma dos dois grupos.</p>}
           <p style={{margin:"2px 0 14px",fontSize:11,color:"#BBB"}}>{MONTHS[month]} {year} · toque para detalhar</p>
           <ResponsiveContainer width="100%" height={200}>
             <PieChart><Pie data={data} cx="50%" cy="50%" outerRadius={75} dataKey="value" label={({percent})=>`${(percent*100).toFixed(0)}%`} labelLine={false} onClick={e=>setDrillModal({title:e.name,items:monthTxs.filter(t=>e.name==="Receitas"?t.tipo==="receita":t.tipo==="despesa")})}>
