@@ -27,6 +27,7 @@ import { DashTab } from "./Dashboard/HomeTab";
 import { LancTab } from "./Dashboard/FinanceTab";
 import { StatTab } from "./Dashboard/StatisticsTab";
 import { AnualTab } from "./Dashboard/AnnualTab";
+import { PlanejamentoPF } from "./Dashboard/PlanejamentoPF";
 import { TxCard } from "./Transactions/TransactionCard";
 
 function App() {
@@ -619,7 +620,7 @@ function App() {
   const fmtV=fmtMoney;
   const openTaxation=()=>setShowTaxation(true);
   const goToTaxation=()=>{ setTab("dashboard"); setShowTaxation(true); };
-  const nav=[{id:"dashboard",label:"Início",icon:"◎"},{id:"lancamentos",label:"Lançamentos",icon:"≡"},{id:"estatistica",label:"Dados Mensais",icon:"◑"},{id:"anual",label:"Dados Anuais",icon:"▦"},{id:"mais",label:"Mais",icon:"⋯",action:goToTaxation}];
+  const nav=[{id:"dashboard",label:"Início",icon:"◎"},{id:"lancamentos",label:"Lançamentos",icon:"≡"},{id:"estatistica",label:"Dados Mensais",icon:"◑"},{id:"anual",label:"Dados Anuais",icon:"▦"},{id:"planejamentoPF",label:"Planejamento PF",icon:"R$"}];
 
   /* ══ RENDER ══════════════════════════════════════════════ */
   return (
@@ -664,7 +665,7 @@ function App() {
         {/* ── DASHBOARD ── */}
         {tab==="dashboard" && (
           <DashTab
-            monthTxs={monthTxs} receitas={receitas} despesas={despesas} resultado={resultado}
+            monthTxs={monthTxs} allTxs={txs} receitas={receitas} despesas={despesas} resultado={resultado}
             saldo={saldo} month={month} year={year} MONTHS={MONTHS}
             totalObrig={totalObrig} C={C} fmtBRL={fmtMoney} openTaxation={openTaxation}
             setNotaModal={setNotaModal} dividendSummary={dividendSummary}
@@ -689,6 +690,8 @@ function App() {
         {tab==="anual" && (
           <AnualTab txs={txs} plMap={effectivePlMap} irrfMap={irrfMap} year={year} C={C} fmtBRL={fmtMoney} calcIRRF={calcIRRF} calcTributacao={calcTributacao} calcINSS={calcINSS} pfOtherIncomeMap={pfOtherIncomeMap} savePfOtherIncome={savePfOtherIncome}/>
         )}
+
+        {tab==="planejamentoPF" && <PlanejamentoPF year={year} month={month} C={C} />}
 
         {tab==="estatistica" && (
           <StatTab
