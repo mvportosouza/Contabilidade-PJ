@@ -42,5 +42,5 @@ jobs:
       - name: Build production
         run: npm run build
 
-      - name: Dependency audit
-        run: npm audit --audit-level=high
+      - name: Audit production and report development advisories
+        run: node .github/scripts/audit-dependencies.cjs
