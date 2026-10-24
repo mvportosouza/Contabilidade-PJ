@@ -156,18 +156,20 @@ async function expandTransaction(page, marker) {
 
   const editButton = card.getByRole('button', { name: /Editar/i })
   if (!(await editButton.isVisible().catch(() => false))) {
-    // Put the card at the top of the scroll area rather than centering it:
-    // on the real mobile viewport, the fixed bottom navigation can cover a
-    // centered card. Storage status/alert banners may also temporarily cover
-    // the card's disclosure control. This helper is used by cleanup paths,
-    // after the test's actual conflict assertions have already run, so force
-    // is limited to expanding the card for deterministic cleanup and does not
-    // bypass the user-facing conflict-resolution interactions under test.
+    // The first button is a toggle: clicking it blindly can collapse a card
+    // that is already expanded. Target only the collapsed-state disclosure
+    // button (▾), so cleanup never toggles an open card closed by accident.
+    // Force is confined to this test-cleanup helper because fixed navigation
+    // and transient status banners can intercept the pointer on mobile.
     await card.evaluate((element) =>
       element.scrollIntoView({ block: 'start', inline: 'nearest' }),
     )
-    await card.locator('button').first().click({ timeout: 10_000, force: true })
+    const collapsedToggle = card.getByRole('button', { name: '▾', exact: true })
+    if (await collapsedToggle.isVisible().catch(() => false)) {
+      await collapsedToggle.click({ timeout: 10_000, force: true })
+    }
   }
+
   await expect(editButton).toBeVisible({ timeout: 10_000 })
   return card
 }
