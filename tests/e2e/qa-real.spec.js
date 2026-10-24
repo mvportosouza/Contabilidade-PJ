@@ -164,10 +164,27 @@ async function expandTransaction(page, marker) {
     await card.evaluate((element) =>
       element.scrollIntoView({ block: 'start', inline: 'nearest' }),
     )
-    const collapsedToggle = card.getByRole('button', { name: '▾', exact: true })
-    if (await collapsedToggle.isVisible().catch(() => false)) {
-      await collapsedToggle.click({ timeout: 10_000, force: true })
+    const disclosureToggle = card.locator('button').first()
+    const toggleLabel = (await disclosureToggle.textContent().catch(() => ''))?.trim()
+
+    // Use the actual button text from the component instead of an accessible-name
+    // match: emoji/arrow rendering can make Playwright's computed name differ.
+    // Only click the disclosure control when it is visibly in the collapsed state.
+    if (toggleLabel === '▾') {
+      await disclosureToggle.click({ timeout: 10_000, force: true })
     }
+
+    // If a transient overlay swallowed the first click, retry only while
+    // the control still shows the collapsed arrow. Never collapse an open card.
+    await expect(editButton)
+      .toBeVisible({ timeout: 3_000 })
+      .catch(async () => {
+        const currentToggleLabel = (await disclosureToggle.textContent().catch(() => ''))?.trim()
+        if (currentToggleLabel === '▾') {
+          await disclosureToggle.click({ timeout: 10_000, force: true })
+        }
+        await expect(editButton).toBeVisible({ timeout: 10_000 })
+      })
   }
 
   await expect(editButton).toBeVisible({ timeout: 10_000 })
