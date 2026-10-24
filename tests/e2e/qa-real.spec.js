@@ -156,13 +156,17 @@ async function expandTransaction(page, marker) {
 
   const editButton = card.getByRole('button', { name: /Editar/i })
   if (!(await editButton.isVisible().catch(() => false))) {
-    // Center the transaction card in the viewport before opening it. The
-    // fixed bottom navigation can otherwise intercept clicks when the card
-    // is near the lower edge of the page in the real production viewport.
+    // Put the card at the top of the scroll area rather than centering it:
+    // on the real mobile viewport, the fixed bottom navigation can cover a
+    // centered card. Storage status/alert banners may also temporarily cover
+    // the card's disclosure control. This helper is used by cleanup paths,
+    // after the test's actual conflict assertions have already run, so force
+    // is limited to expanding the card for deterministic cleanup and does not
+    // bypass the user-facing conflict-resolution interactions under test.
     await card.evaluate((element) =>
-      element.scrollIntoView({ block: 'center', inline: 'nearest' }),
+      element.scrollIntoView({ block: 'start', inline: 'nearest' }),
     )
-    await card.locator('button').first().click({ timeout: 10_000 })
+    await card.locator('button').first().click({ timeout: 10_000, force: true })
   }
   await expect(editButton).toBeVisible({ timeout: 10_000 })
   return card
