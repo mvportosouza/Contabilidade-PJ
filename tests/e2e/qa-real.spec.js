@@ -156,7 +156,13 @@ async function expandTransaction(page, marker) {
 
   const editButton = card.getByRole('button', { name: /Editar/i })
   if (!(await editButton.isVisible().catch(() => false))) {
-    await card.locator('button').first().click()
+    // Center the transaction card in the viewport before opening it. The
+    // fixed bottom navigation can otherwise intercept clicks when the card
+    // is near the lower edge of the page in the real production viewport.
+    await card.evaluate((element) =>
+      element.scrollIntoView({ block: 'center', inline: 'nearest' }),
+    )
+    await card.locator('button').first().click({ timeout: 10_000 })
   }
   await expect(editButton).toBeVisible({ timeout: 10_000 })
   return card
@@ -446,12 +452,18 @@ test.describe('LOTE 01 — RELEASE QA / E2E CERTIFICATION', () => {
   })
 
   test('1.2 dados tributários — modal exibe os principais itens', async ({ page }) => {
-    const moreButton = page
+    // The current production navigation has no "Mais" tab. Taxation is
+    // opened from the dashboard's "Ver Tributação" action, so follow the
+    // actual user flow instead of relying on an obsolete navigation label.
+    const homeButton = page
       .locator('.app-bottom-nav')
-      .getByText('Mais', { exact: true })
+      .getByText('Início', { exact: true })
       .locator('..')
-    await expect(moreButton).toBeVisible({ timeout: 15_000 })
-    await moreButton.click()
+    await expect(homeButton).toBeVisible({ timeout: 15_000 })
+    await homeButton.click()
+    const taxationButton = page.getByRole('button', { name: /Ver Tributação/i })
+    await expect(taxationButton).toBeVisible({ timeout: 15_000 })
+    await taxationButton.click()
     await expect(page.getByText('Tributação', { exact: true })).toBeVisible({
       timeout: 15_000,
     })
