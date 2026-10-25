@@ -8,12 +8,12 @@ Atualizar a documentação do projeto para refletir o estado atual do código e 
 
 Conforme `package.json`:
 
-- Next.js `^16.2.12`
-- React `^19.2.8`
-- React DOM `^19.2.8`
-- ESLint `^9.39.5`
-- `eslint-config-next` `^16.2.12`
-- Vitest `^3.2.7`
+- Next.js `^16.3.3`
+- React `^19.3.1`
+- React DOM `^19.3.1`
+- ESLint `^9.39.4`
+- `eslint-config-next` `^16.3.3`
+- Vitest `^4.1.12`
 
 O CI utiliza Node.js 24.
 

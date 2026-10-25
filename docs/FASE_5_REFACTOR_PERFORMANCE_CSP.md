@@ -58,7 +58,7 @@ As versões documentadas foram alinhadas com o projeto atual:
 - Recharts 3.10.1
 - Supabase JS 2.112.4
 - ESLint 9.39.4
-- Vitest 3.2.7
+- Vitest 4.1.12
 
 ## Validação
 
