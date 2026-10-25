@@ -5,16 +5,16 @@ Aplicativo de gestão financeira para dentista PJ (Simples Nacional).
 ## Tecnologias
 
 - Next.js 16.3.3
-- React 19.2.8
-- React DOM 19.2.8
+- React 19.3.1
+- React DOM 19.3.1
 - Recharts 3.10.1
 - Supabase Auth
 - Supabase PostgreSQL
 - Row Level Security (RLS)
 - localStorage como cache offline por usuário
 - PWA
-- ESLint 9.39.5
-- Vitest 3.2.7
+- ESLint 9.39.4
+- Vitest 4.1.12
 
 ## Arquitetura de persistência e sincronização
 
