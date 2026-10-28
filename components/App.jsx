@@ -194,7 +194,7 @@ function App() {
   // e soma o resultado dos lançamentos do próprio mês. O saldo informado é
   // apenas uma base de abertura e não é tratado como receita.
   const saldoDia01 = Math.max(0, Number(saldoDia01Map?.[plKey]) || 0);
-  const saldo = saldoDia01 + receitas - despesas;
+  const saldo = saldoDia01 + receitas - despesas - distribuicoes;
 
   const allYears = [...new Set([
     year,
