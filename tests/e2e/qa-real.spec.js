@@ -161,30 +161,27 @@ async function expandTransaction(page, marker) {
     // button (▾), so cleanup never toggles an open card closed by accident.
     // Force is confined to this test-cleanup helper because fixed navigation
     // and transient status banners can intercept the pointer on mobile.
+    // Center the card in the viewport. Aligning it to the very top can place
+    // its disclosure button underneath the sticky application header, where
+    // even a forced Playwright click may hit the header instead of the button.
     await card.evaluate((element) =>
-      element.scrollIntoView({ block: 'start', inline: 'nearest' }),
+      element.scrollIntoView({ block: 'center', inline: 'nearest' }),
     )
     const disclosureToggle = card.locator('button').first()
+    await expect(disclosureToggle).toBeVisible({ timeout: 10_000 })
     const toggleLabel = (await disclosureToggle.textContent().catch(() => ''))?.trim()
 
-    // Use the actual button text from the component instead of an accessible-name
-    // match: emoji/arrow rendering can make Playwright's computed name differ.
-    // Only click the disclosure control when it is visibly in the collapsed state.
+    // Use the rendered arrow text rather than a computed accessible name, which
+    // can vary with emoji rendering. Click only when the card is collapsed.
     if (toggleLabel === '▾') {
-      await disclosureToggle.click({ timeout: 10_000, force: true })
+      await disclosureToggle.click({ timeout: 10_000 })
+      await expect(disclosureToggle).toHaveText('▲', { timeout: 5_000 })
     }
 
-    // If a transient overlay swallowed the first click, retry only while
-    // the control still shows the collapsed arrow. Never collapse an open card.
-    await expect(editButton)
-      .toBeVisible({ timeout: 3_000 })
-      .catch(async () => {
-        const currentToggleLabel = (await disclosureToggle.textContent().catch(() => ''))?.trim()
-        if (currentToggleLabel === '▾') {
-          await disclosureToggle.click({ timeout: 10_000, force: true })
-        }
-        await expect(editButton).toBeVisible({ timeout: 10_000 })
-      })
+    // Verify the state change itself before looking for the edit action. This
+    // prevents a swallowed click from being misdiagnosed as a missing Edit
+    // button and never toggles a card that is already expanded.
+    await expect(editButton).toBeVisible({ timeout: 10_000 })
   }
 
   await expect(editButton).toBeVisible({ timeout: 10_000 })
