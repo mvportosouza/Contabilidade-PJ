@@ -764,9 +764,6 @@ function App() {
                 {TIPOS_REC.map(t=><option key={t} value={t}>{t}</option>)}
               </select>
             </Field>
-            <Field label="Descrição do Serviço">
-              <textarea value={form.descricaoServico||form.descricao||""} onChange={e=>setForm(f=>({...f,descricao:e.target.value,descricaoServico:e.target.value}))} rows={3} placeholder="Descreva o serviço prestado e o período correspondente" style={{...iSt,resize:"none",lineHeight:1.5}}/>
-            </Field>
           </> : formTipo==="distribuicao" ? <>
             <Field label="Beneficiário *">
               <input value={form.beneficiarioNome} onChange={e=>setForm(f=>({...f,beneficiarioNome:e.target.value}))} placeholder="Nome do sócio / beneficiário" style={iSt}/>
@@ -825,7 +822,7 @@ function App() {
             </Field>
           )}
 
-          {formTipo==="receita" && <>
+          {formTipo==="receita" && form.recebido===true && <>
             <Field label="Atividade da empresa (CNAE)">
               <select value={form.cnae==="8630-5/04"?"8630-5/04":"outro"} onChange={e=>setForm(f=>({...f,cnae:e.target.value==="outro"?"":e.target.value}))} style={iSt}>
                 <option value="8630-5/04">Atividade odontológica — 8630-5/04</option>
@@ -873,9 +870,12 @@ function App() {
                 <span style={{marginLeft:"auto",fontSize:12,color:C.muted}}>{form.issMunicipal?"Informado":"Não informado"}</span>
               </label>
             </Field>
+            <Field label="Descrição do Serviço">
+              <textarea value={form.descricaoServico||form.descricao||""} onChange={e=>setForm(f=>({...f,descricao:e.target.value,descricaoServico:e.target.value}))} rows={3} placeholder="Descreva o serviço prestado e o período correspondente" style={{...iSt,resize:"none",lineHeight:1.5}}/>
+            </Field>
           </>}
 
-          {formTipo==="receita" && (
+          {formTipo==="receita" && form.recebido===true && (
             <Field label="Nota Fiscal">
               <div style={{display:"flex",gap:8,marginBottom:form.notaGerada?10:0}}>
                 <TogBtn active={form.notaGerada} color={C.navyMid} bg={C.navyLight} onClick={()=>setForm(f=>({...f,notaGerada:true}))}>✅ Emitida</TogBtn>
@@ -898,7 +898,7 @@ function App() {
             </Field>
           )}
 
-          {form.notaGerada && (
+          {form.recebido===true && form.notaGerada && (
             <Field label="Informado à Contabilidade">
               <div style={{display:"flex",gap:8}}>
                 <TogBtn active={form.informadoContab===true} color="#27AE60" bg="#EAFAF1" onClick={()=>setForm(f=>({...f,informadoContab:true}))}>✅ Sim</TogBtn>
