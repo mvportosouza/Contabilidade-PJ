@@ -33,13 +33,15 @@ export function DashTab({monthTxs,receitas,despesas,resultado,saldo,month,year,M
     </Card>
     {(()=>{
       const recMes=monthTxs.filter(t=>t.tipo==="receita");
-      const emitEnv=recMes.filter(t=>t.notaGerada&&t.informadoContab);
-      const emitPend=recMes.filter(t=>t.notaGerada&&!t.informadoContab);
-      const naoEmit=recMes.filter(t=>!t.notaGerada);
+      const aReceber=recMes.filter(t=>t.recebido===false);
+      const emitEnv=recMes.filter(t=>t.recebido!==false&&t.notaGerada&&t.informadoContab);
+      const emitPend=recMes.filter(t=>t.recebido!==false&&t.notaGerada&&!t.informadoContab);
+      const naoEmit=recMes.filter(t=>t.recebido!==false&&!t.notaGerada);
       const nfBtns=[
-        {key:"emitEnviadas",  label:"Emitidas Enviadas",  count:emitEnv.length,  color:"#27AE60",  bg:"#EAFAF1", border:"#A9DFBF"},
-        {key:"emitPendentes", label:"Emitidas Pendentes", count:emitPend.length, color:C.navyMid,  bg:C.navyLight,border:"#B8DEC0"},
-        {key:"pendentes",     label:"À Emitir",            count:naoEmit.length,  color:"#E67E22", bg:"#FFF8F0", border:"#F0C89A"},
+        {key:"aReceber",      label:"À Receber",            count:aReceber.length, color:"#8E6BBE", bg:"#F5F0FA", border:"#D8C6E8"},
+        {key:"pendentes",     label:"À Emitir",             count:naoEmit.length,  color:"#E67E22", bg:"#FFF8F0", border:"#F0C89A"},
+        {key:"emitPendentes", label:"Emitidas Pendentes",   count:emitPend.length, color:C.navyMid, bg:C.navyLight,border:"#B8DEC0"},
+        {key:"emitEnviadas",  label:"Emitidas Enviadas",    count:emitEnv.length,  color:"#27AE60", bg:"#EAFAF1", border:"#A9DFBF"},
       ];
       return(
         <Card style={{marginBottom:12}}>
