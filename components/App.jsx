@@ -269,7 +269,10 @@ function App() {
   const openNew=tipo=>{setEditId(null);setFormTipo(tipo);setForm(createBlankForm());setShowForm(true);};
   const openEdit=tx=>{
     setEditId(tx.id);setFormTipo(tx.tipo);
-    setForm({valor:fmtIn(String(Math.round(tx.valor*100))),data:tx.data,nome:tx.nome||"",cnpj:tx.cnpj||"",telefone:tx.telefone||"",cep:tx.cep||"",endereco:tx.endereco||"",email:tx.email||"",especialidade:tx.especialidade||"",dente:tx.dente||"",categoria:tx.categoria||"",descricao:tx.descricao||"",notaGerada:tx.notaGerada||false,numeroNota:tx.numeroNota||"",dataEmissao:tx.dataEmissao||"",taxaISS:tx.taxaISS||"",informadoContab:tx.informadoContab||false,recebido:tx.recebido!==false,issRetido:tx.issRetido===true,saveAsFav:false,
+    setForm({valor:fmtIn(String(Math.round(tx.valor*100))),data:tx.data,nome:tx.nome||"",cnpj:tx.cnpj||"",telefone:tx.telefone||"",cep:tx.cep||"",endereco:tx.endereco||"",email:tx.email||"",especialidade:tx.especialidade||"",dente:tx.dente||"",categoria:tx.categoria||"",descricao:tx.descricao||"",notaGerada:tx.notaGerada||false,numeroNota:tx.numeroNota||"",dataEmissao:tx.dataEmissao||"",taxaISS:tx.taxaISS||"",informadoContab:tx.informadoContab||false,recebido:tx.recebido!==false,issRetido:tx.issRetido===true,
+      cnae:tx.cnae||"8630-5/04",codigoServico:tx.codigoServico||"04.12.01",nbs:tx.nbs||"1.2301.23.00",indOp:tx.indOp||"030102",
+      descontoAtivo:tx.descontoAtivo===true,descontoTipo:tx.descontoTipo||"valor",descontoValor:tx.descontoValor||"",issMunicipal:tx.issMunicipal===true,descricaoServico:tx.descricaoServico||"",
+      saveAsFav:false,
       beneficiarioNome:tx.beneficiarioNome||tx.nome||"",beneficiarioCpf:tx.beneficiarioCpf||"",
       pjCnpj:tx.pjCnpj||tx.cnpj||"",origemLucro:tx.origemLucro||"apurados_2026",
       aprovacaoDistribuicao:tx.aprovacaoDistribuicao||"",pagamentoPrevistoOriginal:tx.pagamentoPrevistoOriginal||""});
@@ -304,6 +307,15 @@ function App() {
     const normalizedData = normalizeDateOnly(form.data); if(!normalizedData){notify("Data inválida.","err");return;} const tx={id:editId||cryptoId(),tipo:formTipo,valor,data:normalizedData,nome:form.nome||form.categoria||(formTipo==="distribuicao"?"Distribuição de Lucros":""),cnpj:form.cnpj,telefone:form.telefone,cep:form.cep,endereco:form.endereco,email:form.email,especialidade:form.especialidade,dente:form.dente,categoria:form.categoria,descricao:form.descricao,notaGerada:form.notaGerada,numeroNota:form.notaGerada?form.numeroNota:"",dataEmissao:form.notaGerada?(normalizeDateOnly(form.dataEmissao)||""):"",taxaISS:form.notaGerada?form.taxaISS:"",informadoContab:form.notaGerada?form.informadoContab:false,
       recebido:formTipo==="receita"?form.recebido!==false:true,
       issRetido:formTipo==="receita"?form.issRetido===true:false,
+      cnae:formTipo==="receita"?(form.cnae||"8630-5/04"):"",
+      codigoServico:formTipo==="receita"?(form.codigoServico||"04.12.01"):"",
+      nbs:formTipo==="receita"?(form.nbs||"1.2301.23.00"):"",
+      indOp:formTipo==="receita"?(form.indOp||"030102"):"",
+      descontoAtivo:formTipo==="receita"?form.descontoAtivo===true:false,
+      descontoTipo:formTipo==="receita"?(form.descontoTipo||"valor"):"",
+      descontoValor:formTipo==="receita"?(form.descontoValor||""):"",
+      issMunicipal:formTipo==="receita"?form.issMunicipal===true:false,
+      descricaoServico:formTipo==="receita"?(form.descricaoServico||""):"",
       beneficiarioNome:formTipo==="distribuicao"?(form.beneficiarioNome||""):"",
       beneficiarioCpf:formTipo==="distribuicao"?(form.beneficiarioCpf||""):"",
       pjCnpj:formTipo==="distribuicao"?(form.pjCnpj||""):"",
@@ -803,6 +815,59 @@ function App() {
             </div>
           </Field>
           <Field label="Data *"><input type="date" value={form.data} onChange={e=>setForm(f=>({...f,data:e.target.value}))} style={iSt}/></Field>
+
+          {formTipo==="receita" && <>
+            <Field label="Atividade da empresa (CNAE)">
+              <select value={form.cnae==="8630-5/04"?"8630-5/04":"outro"} onChange={e=>setForm(f=>({...f,cnae:e.target.value==="outro"?"":e.target.value}))} style={iSt}>
+                <option value="8630-5/04">Atividade odontológica — 8630-5/04</option>
+                <option value="outro">Outro CNAE</option>
+              </select>
+              {form.cnae!== "8630-5/04" && <input value={form.cnae||""} onChange={e=>setForm(f=>({...f,cnae:e.target.value}))} placeholder="Informe o CNAE" style={{...iSt,marginTop:8}}/>}
+            </Field>
+            <Field label="Serviço prestado (Código Nacional)">
+              <select value={form.codigoServico==="04.12.01"?"04.12.01":"outro"} onChange={e=>setForm(f=>({...f,codigoServico:e.target.value==="outro"?"":e.target.value}))} style={iSt}>
+                <option value="04.12.01">Odontologia — 04.12.01</option>
+                <option value="outro">Outro código de serviço</option>
+              </select>
+              {form.codigoServico!=="04.12.01" && <input value={form.codigoServico||""} onChange={e=>setForm(f=>({...f,codigoServico:e.target.value}))} placeholder="Informe o Código Nacional" style={{...iSt,marginTop:8}}/>}
+            </Field>
+            <Field label="Detalhamento do serviço (NBS)">
+              <select value={form.nbs==="1.2301.23.00"?"1.2301.23.00":"outro"} onChange={e=>setForm(f=>({...f,nbs:e.target.value==="outro"?"":e.target.value}))} style={iSt}>
+                <option value="1.2301.23.00">Serviços odontológicos — 1.2301.23.00</option>
+                <option value="outro">Outro código NBS</option>
+              </select>
+              {form.nbs!=="1.2301.23.00" && <input value={form.nbs||""} onChange={e=>setForm(f=>({...f,nbs:e.target.value}))} placeholder="Informe o código NBS" style={{...iSt,marginTop:8}}/>}
+            </Field>
+            <Field label="Onde o serviço foi prestado (IndOp)">
+              <select value={form.indOp||"030102"} onChange={e=>setForm(f=>({...f,indOp:e.target.value}))} style={iSt}>
+                <option value="030101">No meu estabelecimento — 030101</option>
+                <option value="030102">Fora do meu estabelecimento — 030102</option>
+              </select>
+            </Field>
+            <Field label="Desconto">
+              <div style={{display:"flex",gap:8,marginBottom:form.descontoAtivo?8:0}}>
+                <TogBtn active={form.descontoAtivo===false} color={C.navyMid} bg={C.navyLight} onClick={()=>setForm(f=>({...f,descontoAtivo:false,descontoValor:""}))}>Não informar</TogBtn>
+                <TogBtn active={form.descontoAtivo===true} color={C.navyMid} bg={C.navyLight} onClick={()=>setForm(f=>({...f,descontoAtivo:true}))}>Informar desconto</TogBtn>
+              </div>
+              {form.descontoAtivo && <div style={{display:"flex",gap:8}}>
+                <select value={form.descontoTipo||"valor"} onChange={e=>setForm(f=>({...f,descontoTipo:e.target.value}))} style={{...iSt,width:"42%"}}>
+                  <option value="valor">R$</option>
+                  <option value="percentual">%</option>
+                </select>
+                <input value={form.descontoValor||""} onChange={e=>setForm(f=>({...f,descontoValor:e.target.value.replace(/[^0-9,.]/g,"")}))} placeholder={form.descontoTipo==="percentual"?"0,00%":"0,00"} inputMode="decimal" style={iSt}/>
+              </div>}
+            </Field>
+            <Field label="Imposto Municipal">
+              <label style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",border:`1px solid ${C.border}`,borderRadius:12,cursor:"pointer",background:"white"}}>
+                <ChkBox checked={form.issMunicipal===true} onChange={v=>setForm(f=>({...f,issMunicipal:v}))}/>
+                <span style={{fontSize:14,color:C.text}}>ISS</span>
+                <span style={{marginLeft:"auto",fontSize:12,color:C.muted}}>{form.issMunicipal?"Informado":"Não informado"}</span>
+              </label>
+            </Field>
+            <Field label="Descrição do serviço">
+              <textarea value={form.descricaoServico||""} onChange={e=>setForm(f=>({...f,descricaoServico:e.target.value}))} rows={3} placeholder="Descreva o serviço prestado e o período correspondente" style={{...iSt,resize:"vertical",lineHeight:1.5}}/>
+            </Field>
+          </>}
 
           {formTipo==="receita" && <>
             <Field label="Recebido">
