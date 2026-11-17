@@ -278,11 +278,7 @@ function App() {
       aprovacaoDistribuicao:tx.aprovacaoDistribuicao||"",pagamentoPrevistoOriginal:tx.pagamentoPrevistoOriginal||""});
     setShowForm(true);
   };
-  const handleCat=cat=>{
-    if(formTipo==="receita"&&cat==="Recebimento de Clientes") setForm(f=>({...f,categoria:cat,descricao:"Prestação de serviço odontológico (8630-5/04) nos dias: ",descricaoServico:"Prestação de serviço odontológico (8630-5/04) nos dias: "}));
-    else setForm(f=>({...f,categoria:cat,descricao:"",descricaoServico:""}));
-  };
-  const handleSubmit=async()=>{
+const handleSubmit=async()=>{
     // Wait for the initial asynchronous storage hydration. Without this
     // guard, a very fast first submission can race with the hydration effect
     // and have its newly saved favorite overwritten in React state.
@@ -758,12 +754,6 @@ function App() {
             </Field>
             <Field label="Endereço"><input value={form.endereco||""} onChange={e=>setForm(f=>({...f,endereco:e.target.value}))} placeholder="Rua, número, bairro..." style={iSt}/></Field>
             <Field label="E-mail"><input value={form.email||""} onChange={e=>setForm(f=>({...f,email:e.target.value}))} placeholder="email@exemplo.com" inputMode="email" style={iSt}/></Field>
-            <Field label="Descrição da Receita">
-              <select value={form.categoria} onChange={e=>handleCat(e.target.value)} style={{...iSt,color:form.categoria?C.text:"#AAA"}}>
-                <option value="">Selecione...</option>
-                {TIPOS_REC.map(t=><option key={t} value={t}>{t}</option>)}
-              </select>
-            </Field>
           </> : formTipo==="distribuicao" ? <>
             <Field label="Beneficiário *">
               <input value={form.beneficiarioNome} onChange={e=>setForm(f=>({...f,beneficiarioNome:e.target.value}))} placeholder="Nome do sócio / beneficiário" style={iSt}/>
@@ -814,11 +804,10 @@ function App() {
 
           {formTipo==="receita" && (
             <Field label="Recebido">
-              <label style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",border:`1px solid ${C.border}`,borderRadius:12,cursor:"pointer",background:"white"}}>
-                <ChkBox checked={form.recebido===true} onChange={v=>setForm(f=>({...f,recebido:v}))}/>
-                <span style={{fontSize:14,color:C.text}}>Recebido</span>
-                <span style={{marginLeft:"auto",fontSize:12,color:C.muted}}>{form.recebido===true?"Sim":"Não"}</span>
-              </label>
+              <div style={{display:"flex",gap:8}}>
+                <TogBtn active={form.recebido===true} color="#27AE60" bg="#EAFAF1" onClick={()=>setForm(f=>({...f,recebido:true}))}>✅ Sim</TogBtn>
+                <TogBtn active={form.recebido===false} color={C.red} bg={C.redLight} onClick={()=>setForm(f=>({...f,recebido:false}))}>⏳ Não</TogBtn>
+              </div>
             </Field>
           )}
 
@@ -864,11 +853,10 @@ function App() {
               </div>}
             </Field>
             <Field label="Imposto Municipal">
-              <label style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",border:`1px solid ${C.border}`,borderRadius:12,cursor:"pointer",background:"white"}}>
-                <ChkBox checked={form.issMunicipal===true} onChange={v=>setForm(f=>({...f,issMunicipal:v}))}/>
-                <span style={{fontSize:14,color:C.text}}>ISS</span>
-                <span style={{marginLeft:"auto",fontSize:12,color:C.muted}}>{form.issMunicipal?"Informado":"Não informado"}</span>
-              </label>
+              <div style={{display:"flex",gap:8}}>
+                <TogBtn active={form.issMunicipal===true} color="#27AE60" bg="#EAFAF1" onClick={()=>setForm(f=>({...f,issMunicipal:true}))}>✅ Sim</TogBtn>
+                <TogBtn active={form.issMunicipal===false} color={C.red} bg={C.redLight} onClick={()=>setForm(f=>({...f,issMunicipal:false}))}>⏳ Não</TogBtn>
+              </div>
             </Field>
             <Field label="Descrição do Serviço">
               <textarea value={form.descricaoServico||form.descricao||""} onChange={e=>setForm(f=>({...f,descricao:e.target.value,descricaoServico:e.target.value}))} rows={3} placeholder="Descreva o serviço prestado e o período correspondente" style={{...iSt,resize:"none",lineHeight:1.5}}/>
@@ -1198,12 +1186,6 @@ function App() {
             <Field label="CEP"><input value={favoriteEdit.cep||""} onChange={e=>setFavoriteEdit(f=>({...f,cep:formatCep(e.target.value)}))} inputMode="numeric" style={iSt}/></Field>
             <Field label="Endereço"><input value={favoriteEdit.endereco||""} onChange={e=>setFavoriteEdit(f=>({...f,endereco:e.target.value}))} style={iSt}/></Field>
             <Field label="E-mail"><input value={favoriteEdit.email||""} onChange={e=>setFavoriteEdit(f=>({...f,email:e.target.value}))} inputMode="email" style={iSt}/></Field>
-            <Field label="Descrição da Receita">
-              <select value={favoriteEdit.categoria||""} onChange={e=>setFavoriteEdit(f=>({...f,categoria:e.target.value}))} style={{...iSt,color:favoriteEdit.categoria?C.text:"#AAA"}}>
-                <option value="">Selecione...</option>
-                {TIPOS_REC.map(t=><option key={t} value={t}>{t}</option>)}
-              </select>
-            </Field>
           </>}
           <div style={{display:"flex",gap:8,marginTop:4}}>
             <button onClick={saveFavoriteEdit} style={{flex:1,background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,border:"none",borderRadius:14,padding:"14px",color:"white",fontFamily:"inherit",fontSize:14,fontWeight:"700",cursor:"pointer"}}>Salvar alterações</button>
