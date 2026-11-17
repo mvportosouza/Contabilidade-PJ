@@ -269,7 +269,7 @@ function App() {
   const openNew=tipo=>{setEditId(null);setFormTipo(tipo);setForm(createBlankForm());setShowForm(true);};
   const openEdit=tx=>{
     setEditId(tx.id);setFormTipo(tx.tipo);
-    setForm({valor:fmtIn(String(Math.round(tx.valor*100))),data:tx.data,nome:tx.nome||"",cnpj:tx.cnpj||"",telefone:tx.telefone||"",cep:tx.cep||"",endereco:tx.endereco||"",email:tx.email||"",especialidade:tx.especialidade||"",dente:tx.dente||"",categoria:tx.categoria||"",descricao:tx.descricao||"",notaGerada:tx.notaGerada||false,numeroNota:tx.numeroNota||"",dataEmissao:tx.dataEmissao||"",taxaISS:tx.taxaISS||"",informadoContab:tx.informadoContab||false,recebido:tx.recebido!==false,issRetido:tx.issRetido===true,
+    setForm({valor:fmtIn(String(Math.round(tx.valor*100))),data:tx.data,nome:tx.nome||"",cnpj:tx.cnpj||"",telefone:tx.telefone||"",cep:tx.cep||"",endereco:tx.endereco||"",email:tx.email||"",especialidade:tx.especialidade||"",dente:tx.dente||"",categoria:tx.categoria||"",descricao:tx.descricao||"",notaGerada:tx.notaGerada||false,numeroNota:tx.numeroNota||"",dataEmissao:tx.dataEmissao||"",taxaISS:tx.taxaISS||"",informadoContab:tx.informadoContab||false,recebido:tx.recebido!==false,
       cnae:tx.cnae||"8630-5/04",codigoServico:tx.codigoServico||"04.12.01",nbs:tx.nbs||"1.2301.23.00",indOp:tx.indOp||"030102",
       descontoAtivo:tx.descontoAtivo===true,descontoTipo:tx.descontoTipo||"valor",descontoValor:tx.descontoValor||"",issMunicipal:tx.issMunicipal===true,descricaoServico:tx.descricaoServico||"",
       saveAsFav:false,
@@ -279,8 +279,8 @@ function App() {
     setShowForm(true);
   };
   const handleCat=cat=>{
-    if(formTipo==="receita"&&cat==="Recebimento de Clientes") setForm(f=>({...f,categoria:cat,descricao:"Prestação de serviço odontológico (8630-5/04) nos dias: "}));
-    else setForm(f=>({...f,categoria:cat,descricao:""}));
+    if(formTipo==="receita"&&cat==="Recebimento de Clientes") setForm(f=>({...f,categoria:cat,descricao:"Prestação de serviço odontológico (8630-5/04) nos dias: ",descricaoServico:"Prestação de serviço odontológico (8630-5/04) nos dias: "}));
+    else setForm(f=>({...f,categoria:cat,descricao:"",descricaoServico:""}));
   };
   const handleSubmit=async()=>{
     // Wait for the initial asynchronous storage hydration. Without this
@@ -306,7 +306,6 @@ function App() {
     const valor=parseBRL(form.valor); if(valor<=0){notify("Valor inválido.","err");return;}
     const normalizedData = normalizeDateOnly(form.data); if(!normalizedData){notify("Data inválida.","err");return;} const tx={id:editId||cryptoId(),tipo:formTipo,valor,data:normalizedData,nome:form.nome||form.categoria||(formTipo==="distribuicao"?"Distribuição de Lucros":""),cnpj:form.cnpj,telefone:form.telefone,cep:form.cep,endereco:form.endereco,email:form.email,especialidade:form.especialidade,dente:form.dente,categoria:form.categoria,descricao:form.descricao,notaGerada:form.notaGerada,numeroNota:form.notaGerada?form.numeroNota:"",dataEmissao:form.notaGerada?(normalizeDateOnly(form.dataEmissao)||""):"",taxaISS:form.notaGerada?form.taxaISS:"",informadoContab:form.notaGerada?form.informadoContab:false,
       recebido:formTipo==="receita"?form.recebido!==false:true,
-      issRetido:formTipo==="receita"?form.issRetido===true:false,
       cnae:formTipo==="receita"?(form.cnae||"8630-5/04"):"",
       codigoServico:formTipo==="receita"?(form.codigoServico||"04.12.01"):"",
       nbs:formTipo==="receita"?(form.nbs||"1.2301.23.00"):"",
@@ -315,7 +314,7 @@ function App() {
       descontoTipo:formTipo==="receita"?(form.descontoTipo||"valor"):"",
       descontoValor:formTipo==="receita"?(form.descontoValor||""):"",
       issMunicipal:formTipo==="receita"?form.issMunicipal===true:false,
-      descricaoServico:formTipo==="receita"?(form.descricaoServico||""):"",
+      descricaoServico:formTipo==="receita"?(form.descricaoServico||form.descricao||""):"",
       beneficiarioNome:formTipo==="distribuicao"?(form.beneficiarioNome||""):"",
       beneficiarioCpf:formTipo==="distribuicao"?(form.beneficiarioCpf||""):"",
       pjCnpj:formTipo==="distribuicao"?(form.pjCnpj||""):"",
@@ -765,8 +764,8 @@ function App() {
                 {TIPOS_REC.map(t=><option key={t} value={t}>{t}</option>)}
               </select>
             </Field>
-            <Field label="Observação">
-              <textarea value={form.descricao} onChange={e=>setForm(f=>({...f,descricao:e.target.value}))} rows={3} placeholder="Detalhes..." style={{...iSt,resize:"none",lineHeight:1.5}}/>
+            <Field label="Descrição do Serviço">
+              <textarea value={form.descricaoServico||form.descricao||""} onChange={e=>setForm(f=>({...f,descricao:e.target.value,descricaoServico:e.target.value}))} rows={3} placeholder="Descreva o serviço prestado e o período correspondente" style={{...iSt,resize:"none",lineHeight:1.5}}/>
             </Field>
           </> : formTipo==="distribuicao" ? <>
             <Field label="Beneficiário *">
@@ -816,6 +815,16 @@ function App() {
           </Field>
           <Field label="Data *"><input type="date" value={form.data} onChange={e=>setForm(f=>({...f,data:e.target.value}))} style={iSt}/></Field>
 
+          {formTipo==="receita" && (
+            <Field label="Recebido">
+              <label style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",border:`1px solid ${C.border}`,borderRadius:12,cursor:"pointer",background:"white"}}>
+                <ChkBox checked={form.recebido===true} onChange={v=>setForm(f=>({...f,recebido:v}))}/>
+                <span style={{fontSize:14,color:C.text}}>Recebido</span>
+                <span style={{marginLeft:"auto",fontSize:12,color:C.muted}}>{form.recebido===true?"Sim":"Não"}</span>
+              </label>
+            </Field>
+          )}
+
           {formTipo==="receita" && <>
             <Field label="Atividade da empresa (CNAE)">
               <select value={form.cnae==="8630-5/04"?"8630-5/04":"outro"} onChange={e=>setForm(f=>({...f,cnae:e.target.value==="outro"?"":e.target.value}))} style={iSt}>
@@ -863,24 +872,6 @@ function App() {
                 <span style={{fontSize:14,color:C.text}}>ISS</span>
                 <span style={{marginLeft:"auto",fontSize:12,color:C.muted}}>{form.issMunicipal?"Informado":"Não informado"}</span>
               </label>
-            </Field>
-            <Field label="Descrição do serviço">
-              <textarea value={form.descricaoServico||""} onChange={e=>setForm(f=>({...f,descricaoServico:e.target.value}))} rows={3} placeholder="Descreva o serviço prestado e o período correspondente" style={{...iSt,resize:"vertical",lineHeight:1.5}}/>
-            </Field>
-          </>}
-
-          {formTipo==="receita" && <>
-            <Field label="Recebido">
-              <div style={{display:"flex",gap:8}}>
-                <TogBtn active={form.recebido===true} color="#27AE60" bg="#EAFAF1" onClick={()=>setForm(f=>({...f,recebido:true}))}>✅ Sim</TogBtn>
-                <TogBtn active={form.recebido===false} color={C.red} bg={C.redLight} onClick={()=>setForm(f=>({...f,recebido:false}))}>⏳ Não</TogBtn>
-              </div>
-            </Field>
-            <Field label="ISS">
-              <div style={{display:"flex",gap:8}}>
-                <TogBtn active={form.issRetido===true} color={C.navyMid} bg={C.navyLight} onClick={()=>setForm(f=>({...f,issRetido:true}))}>Retido</TogBtn>
-                <TogBtn active={form.issRetido===false} color={C.navyMid} bg={C.navyLight} onClick={()=>setForm(f=>({...f,issRetido:false}))}>Não Retido</TogBtn>
-              </div>
             </Field>
           </>}
 
