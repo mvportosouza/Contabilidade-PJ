@@ -58,7 +58,7 @@ const createBlankForm = (date = new Date()) => ({
   descontoTipo: "valor",
   descontoValor: "",
   issMunicipal: false,
-  descricaoServico: "",
+  descricaoServico: "Prestação de serviço odontológico (8630-5/04) nos dias: ",
   saveAsFav: false,
   beneficiarioNome: "",
   beneficiarioCpf: "",
