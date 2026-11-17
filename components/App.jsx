@@ -269,7 +269,7 @@ function App() {
   const openNew=tipo=>{setEditId(null);setFormTipo(tipo);setForm(createBlankForm());setShowForm(true);};
   const openEdit=tx=>{
     setEditId(tx.id);setFormTipo(tx.tipo);
-    setForm({valor:fmtIn(String(Math.round(tx.valor*100))),data:tx.data,nome:tx.nome||"",cnpj:tx.cnpj||"",telefone:tx.telefone||"",cep:tx.cep||"",endereco:tx.endereco||"",email:tx.email||"",especialidade:tx.especialidade||"",dente:tx.dente||"",categoria:tx.categoria||"",descricao:tx.descricao||"",notaGerada:tx.notaGerada||false,numeroNota:tx.numeroNota||"",dataEmissao:tx.dataEmissao||"",taxaISS:tx.taxaISS||"",informadoContab:tx.informadoContab||false,saveAsFav:false,
+    setForm({valor:fmtIn(String(Math.round(tx.valor*100))),data:tx.data,nome:tx.nome||"",cnpj:tx.cnpj||"",telefone:tx.telefone||"",cep:tx.cep||"",endereco:tx.endereco||"",email:tx.email||"",especialidade:tx.especialidade||"",dente:tx.dente||"",categoria:tx.categoria||"",descricao:tx.descricao||"",notaGerada:tx.notaGerada||false,numeroNota:tx.numeroNota||"",dataEmissao:tx.dataEmissao||"",taxaISS:tx.taxaISS||"",informadoContab:tx.informadoContab||false,recebido:tx.recebido!==false,issRetido:tx.issRetido===true,saveAsFav:false,
       beneficiarioNome:tx.beneficiarioNome||tx.nome||"",beneficiarioCpf:tx.beneficiarioCpf||"",
       pjCnpj:tx.pjCnpj||tx.cnpj||"",origemLucro:tx.origemLucro||"apurados_2026",
       aprovacaoDistribuicao:tx.aprovacaoDistribuicao||"",pagamentoPrevistoOriginal:tx.pagamentoPrevistoOriginal||""});
@@ -302,6 +302,8 @@ function App() {
     }
     const valor=parseBRL(form.valor); if(valor<=0){notify("Valor inválido.","err");return;}
     const normalizedData = normalizeDateOnly(form.data); if(!normalizedData){notify("Data inválida.","err");return;} const tx={id:editId||cryptoId(),tipo:formTipo,valor,data:normalizedData,nome:form.nome||form.categoria||(formTipo==="distribuicao"?"Distribuição de Lucros":""),cnpj:form.cnpj,telefone:form.telefone,cep:form.cep,endereco:form.endereco,email:form.email,especialidade:form.especialidade,dente:form.dente,categoria:form.categoria,descricao:form.descricao,notaGerada:form.notaGerada,numeroNota:form.notaGerada?form.numeroNota:"",dataEmissao:form.notaGerada?(normalizeDateOnly(form.dataEmissao)||""):"",taxaISS:form.notaGerada?form.taxaISS:"",informadoContab:form.notaGerada?form.informadoContab:false,
+      recebido:formTipo==="receita"?form.recebido!==false:true,
+      issRetido:formTipo==="receita"?form.issRetido===true:false,
       beneficiarioNome:formTipo==="distribuicao"?(form.beneficiarioNome||""):"",
       beneficiarioCpf:formTipo==="distribuicao"?(form.beneficiarioCpf||""):"",
       pjCnpj:formTipo==="distribuicao"?(form.pjCnpj||""):"",
@@ -802,6 +804,21 @@ function App() {
           </Field>
           <Field label="Data *"><input type="date" value={form.data} onChange={e=>setForm(f=>({...f,data:e.target.value}))} style={iSt}/></Field>
 
+          {formTipo==="receita" && <>
+            <Field label="Recebido">
+              <div style={{display:"flex",gap:8}}>
+                <TogBtn active={form.recebido===true} color="#27AE60" bg="#EAFAF1" onClick={()=>setForm(f=>({...f,recebido:true}))}>✅ Sim</TogBtn>
+                <TogBtn active={form.recebido===false} color={C.red} bg={C.redLight} onClick={()=>setForm(f=>({...f,recebido:false}))}>⏳ Não</TogBtn>
+              </div>
+            </Field>
+            <Field label="ISS">
+              <div style={{display:"flex",gap:8}}>
+                <TogBtn active={form.issRetido===true} color={C.navyMid} bg={C.navyLight} onClick={()=>setForm(f=>({...f,issRetido:true}))}>Retido</TogBtn>
+                <TogBtn active={form.issRetido===false} color={C.navyMid} bg={C.navyLight} onClick={()=>setForm(f=>({...f,issRetido:false}))}>Não Retido</TogBtn>
+              </div>
+            </Field>
+          </>}
+
           {formTipo==="receita" && (
             <Field label="Nota Fiscal">
               <div style={{display:"flex",gap:8,marginBottom:form.notaGerada?10:0}}>
@@ -861,9 +878,10 @@ function App() {
       {notaModal && (()=>{
         const recMes=monthTxs.filter(t=>t.tipo==="receita");
         const configs={
-          emitEnviadas: {lista:recMes.filter(t=>t.notaGerada&&t.informadoContab),  label:"Emitidas Enviadas",  color:"#27AE60", bg:"#EAFAF1"},
-          emitPendentes:{lista:recMes.filter(t=>t.notaGerada&&!t.informadoContab), label:"Emitidas Pendentes", color:C.navyMid,  bg:C.navyLight},
-          pendentes:    {lista:recMes.filter(t=>!t.notaGerada),                    label:"À Emitir",            color:"#E67E22",  bg:"#FFF8F0"},
+          aReceber:     {lista:recMes.filter(t=>t.recebido===false), label:"À Receber", color:"#8E6BBE", bg:"#F5F0FA"},
+          emitEnviadas: {lista:recMes.filter(t=>t.recebido!==false&&t.notaGerada&&t.informadoContab),  label:"Emitidas Enviadas",  color:"#27AE60", bg:"#EAFAF1"},
+          emitPendentes:{lista:recMes.filter(t=>t.recebido!==false&&t.notaGerada&&!t.informadoContab), label:"Emitidas Pendentes", color:C.navyMid,  bg:C.navyLight},
+          pendentes:    {lista:recMes.filter(t=>t.recebido!==false&&!t.notaGerada), label:"À Emitir", color:"#E67E22", bg:"#FFF8F0"},
         };
         const cfg=configs[notaModal];
         if(!cfg) return null;

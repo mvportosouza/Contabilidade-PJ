@@ -49,6 +49,8 @@ const createBlankForm = (date = new Date()) => ({
   descricao: "",
   notaGerada: false,
   numeroNota: "",
+  recebido: false,
+  issRetido: false,
   saveAsFav: false,
   beneficiarioNome: "",
   beneficiarioCpf: "",
