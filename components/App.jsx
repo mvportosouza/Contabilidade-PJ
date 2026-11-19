@@ -802,14 +802,17 @@ const handleSubmit=async()=>{
           </Field>
           <Field label="Data *"><input type="date" value={form.data} onChange={e=>setForm(f=>({...f,data:e.target.value}))} style={iSt}/></Field>
 
-          {formTipo==="receita" && (
+          {formTipo==="receita" && <>
+            <Field label="Descrição do Serviço">
+              <textarea value={form.descricaoServico||form.descricao||""} onChange={e=>setForm(f=>({...f,descricao:e.target.value,descricaoServico:e.target.value}))} rows={3} placeholder="Descreva o serviço prestado e o período correspondente" style={{...iSt,resize:"none",lineHeight:1.5}}/>
+            </Field>
             <Field label="Recebido">
               <div style={{display:"flex",gap:8}}>
                 <TogBtn active={form.recebido===true} color="#27AE60" bg="#EAFAF1" onClick={()=>setForm(f=>({...f,recebido:true}))}>✅ Sim</TogBtn>
                 <TogBtn active={form.recebido===false} color={C.red} bg={C.redLight} onClick={()=>setForm(f=>({...f,recebido:false}))}>⏳ Não</TogBtn>
               </div>
             </Field>
-          )}
+          </>}
 
           {formTipo==="receita" && form.recebido===true && <>
             <Field label="Atividade da empresa (CNAE)">
@@ -857,9 +860,6 @@ const handleSubmit=async()=>{
                 <TogBtn active={form.issMunicipal===true} color="#27AE60" bg="#EAFAF1" onClick={()=>setForm(f=>({...f,issMunicipal:true}))}>✅ Sim</TogBtn>
                 <TogBtn active={form.issMunicipal===false} color={C.red} bg={C.redLight} onClick={()=>setForm(f=>({...f,issMunicipal:false}))}>⏳ Não</TogBtn>
               </div>
-            </Field>
-            <Field label="Descrição do Serviço">
-              <textarea value={form.descricaoServico||form.descricao||""} onChange={e=>setForm(f=>({...f,descricao:e.target.value,descricaoServico:e.target.value}))} rows={3} placeholder="Descreva o serviço prestado e o período correspondente" style={{...iSt,resize:"none",lineHeight:1.5}}/>
             </Field>
           </>}
 
