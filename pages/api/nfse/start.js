@@ -65,9 +65,22 @@ export default async function handler(req, res) {
     const token = process.env.GITHUB_ACTIONS_TOKEN
     const repo = process.env.GITHUB_ACTIONS_REPOSITORY || 'mvportosouza/Contabilidade-PJ'
     const workflow = process.env.NFSE_WORKFLOW_FILE || 'nfse-assistida.yml'
-    if (!token) {
+    const baseUrl = process.env.NFSE_API_BASE_URL || process.env.NEXT_PUBLIC_SITE_URL || ''
+    if (!token || !baseUrl) {
       await admin.from('nfse_automation_runs').update({ status: 'failed', error_code: 'GITHUB_DISPATCH_NOT_CONFIGURED' }).eq('id', run.id)
       return res.status(503).json({ error: 'AUTOMATION_NOT_CONFIGURED' })
+    }
+
+    let parsedBaseUrl
+    try { parsedBaseUrl = new URL(baseUrl) } catch { parsedBaseUrl = null }
+    if (!parsedBaseUrl || parsedBaseUrl.protocol !== 'https:' || parsedBaseUrl.username || parsedBaseUrl.password || parsedBaseUrl.pathname !== '/' || parsedBaseUrl.search || parsedBaseUrl.hash) {
+      await admin.from('nfse_automation_runs').update({ status: 'failed', error_code: 'NFSE_API_BASE_URL_INVALID' }).eq('id', run.id)
+      return res.status(500).json({ error: 'AUTOMATION_CONFIGURATION_INVALID' })
+    }
+
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || !/^[A-Za-z0-9_.-]+$/.test(workflow)) {
+      await admin.from('nfse_automation_runs').update({ status: 'failed', error_code: 'GITHUB_DISPATCH_CONFIG_INVALID' }).eq('id', run.id)
+      return res.status(500).json({ error: 'AUTOMATION_CONFIGURATION_INVALID' })
     }
 
     const dispatch = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/${workflow}/dispatches`, {
