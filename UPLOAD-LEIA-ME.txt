@@ -1,0 +1,23 @@
+PACOTE DE ARQUIVOS ALTERADOS — NFS-e (autenticação assistida)
+
+Mantenha os caminhos exatamente como estão no ZIP e faça upload/substituição dos arquivos no repositório.
+
+Arquivos:
+- .github/workflows/nfse-assistida.yml (novo workflow manual)
+- pages/api/nfse/otp.js (validação, criptografia e prazo do OTP)
+- pages/api/nfse/worker.js (claim atômico, consumo único do OTP e transições)
+- pages/api/nfse/start.js (validação da origem HTTPS usada pelo runner e dispatch)
+- scripts/nfse/worker.mjs (Playwright instalado isoladamente pelo workflow)
+- docs/NFSE_AUTOMACAO_ASSISTIDA_SETUP.md (instruções de configuração)
+
+SUPABASE:
+A tabela public.nfse_automation_runs e a função public.consume_nfse_otp(uuid) já foram aplicadas no projeto de produção e verificadas nesta etapa. Não execute novamente a migration antiga que cria a tabela. Não é necessário enviar SQL novamente.
+
+SEGURANÇA:
+Nenhum token, senha, código OTP ou chave foi incluído no pacote. Os secrets devem ser inseridos diretamente nos painéis da Vercel e do GitHub. Não os envie pelo chat.
+
+ESCOPO:
+Este pacote só habilita autenticação assistida e validação de acesso à Contabilizei. Não preenche nem emite NFS-e. A validação real dos seletores ainda precisa acontecer com as credenciais e o método 2FA configurados.
+
+TESTES:
+A sintaxe JavaScript dos endpoints e do worker foi validada com node --check. O workflow foi analisado estruturalmente. npm ci não terminou nesta execução, portanto não foi possível confirmar o build nem executar toda a suíte de testes.
