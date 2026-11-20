@@ -1,4 +1,9 @@
-import { chromium } from 'playwright'
+import { pathToFileURL } from 'node:url'
+
+const playwrightEntry = process.env.NFSE_NODE_PATH
+  ? pathToFileURL(`${process.env.NFSE_NODE_PATH}/playwright/index.mjs`).href
+  : 'playwright'
+const { chromium } = await import(playwrightEntry)
 
 const baseUrl = process.env.NFSE_API_BASE_URL?.replace(/\/$/, '')
 const bridgeToken = process.env.NFSE_WORKER_BRIDGE_TOKEN
