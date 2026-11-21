@@ -59,7 +59,7 @@ export default async function handler(req, res) {
       const transitions = {
         authenticating: ['awaiting_otp', 'failed'],
         awaiting_otp: ['validating_access', 'failed'],
-        validating_access: ['completed', 'failed'],
+        validating_access: ['awaiting_otp', 'completed', 'failed'],
       }
       const patch = { status, updated_at: new Date().toISOString() }
       if (status === 'failed') patch.error_code = String(req.body?.errorCode || 'WORKER_FAILED').replace(/[^A-Z0-9_:-]/gi, '_').slice(0, 80)
