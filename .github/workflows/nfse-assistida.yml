@@ -1,0 +1,48 @@
+name: NFS-e - autenticação assistida
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Identificador da execução criada pelo aplicativo
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nfse-assistida-${{ inputs.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  validate-access:
+    name: Validar acesso à Contabilizei (sem emitir nota)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6.5.0
+        with:
+          node-version: 24
+
+      - name: Install Playwright
+        run: |
+          mkdir -p "$RUNNER_TEMP/nfse-deps"
+          npm install --prefix "$RUNNER_TEMP/nfse-deps" --no-save --no-package-lock playwright@1.56.1
+          echo "NFSE_NODE_PATH=$RUNNER_TEMP/nfse-deps/node_modules" >> "$GITHUB_ENV"
+
+      - name: Install Chromium
+        run: "$RUNNER_TEMP/nfse-deps/node_modules/.bin/playwright install --with-deps chromium"
+
+      - name: Validate Contabilizei access
+        env:
+          NFSE_API_BASE_URL: ${{ secrets.NFSE_API_BASE_URL }}
+          NFSE_WORKER_BRIDGE_TOKEN: ${{ secrets.NFSE_WORKER_BRIDGE_TOKEN }}
+          NFSE_RUN_ID: ${{ inputs.run_id }}
+        run: node scripts/nfse/worker.mjs
