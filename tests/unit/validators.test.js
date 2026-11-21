@@ -20,6 +20,7 @@ describe('validação e backup',()=>{
      descontoTipo:'percentual',
      descontoValor:'10,00',
      issMunicipal:true,
+     municipioPrestacao:'Aracaju/SE',
      descricaoServico:'Prestação de serviço odontológico (8630-5/04) nos dias: 13/11/2026',
      notaGerada:true,
      numeroNota:'NF-2026-001',
@@ -35,6 +36,19 @@ describe('validação e backup',()=>{
      favs:[],
    });
    expect(Object.fromEntries(Object.keys(fiscal).map(key=>[key,backup.txs[0][key]]))).toEqual(fiscal);
+ });
+
+ it('preserva o município da prestação e aplica Aracaju/SE em registros legados',()=>{
+   const withCity=normalizeBackup({
+     version:BACKUP_VERSION,
+     schema:'contabilidade-pj-backup',
+     exportedAt:'2026-11-21T12:00:00.000Z',
+     txs:[{id:'city-1',tipo:'receita',valor:220,data:'2026-11-13',municipioPrestacao:'Nossa Senhora do Socorro/SE'}],
+     favs:[],
+   });
+   expect(withCity.txs[0].municipioPrestacao).toBe('Nossa Senhora do Socorro/SE');
+   const legacy=normalizeBackup({version:3,transactions:[{id:'city-legacy',tipo:'receita',valor:220,data:'2026-10-13'}],favorites:[]});
+   expect(legacy.txs[0].municipioPrestacao).toBe('Aracaju/SE');
  });
 
  it('mantém compatibilidade com lançamentos antigos sem o campo recebido',()=>{
