@@ -295,7 +295,7 @@ function App() {
   const openEdit=tx=>{
     setEditId(tx.id);setFormTipo(tx.tipo);
     setForm({valor:fmtIn(String(Math.round(tx.valor*100))),data:tx.data,nome:tx.nome||"",cnpj:tx.cnpj||"",telefone:tx.telefone||"",cep:tx.cep||"",endereco:tx.endereco||"",email:tx.email||"",especialidade:tx.especialidade||"",dente:tx.dente||"",categoria:tx.categoria||"",descricao:tx.descricao||"",notaGerada:tx.notaGerada||false,numeroNota:tx.numeroNota||"",dataEmissao:tx.dataEmissao||"",taxaISS:tx.taxaISS||"",informadoContab:tx.informadoContab||false,recebido:tx.recebido!==false,
-      cnae:tx.cnae||"8630-5/04",codigoServico:tx.codigoServico||"04.12.01",nbs:tx.nbs||"1.2301.23.00",indOp:tx.indOp||"030102",
+      municipioPrestacao:tx.municipioPrestacao||"Aracaju/SE",cnae:tx.cnae||"8630-5/04",codigoServico:tx.codigoServico||"04.12.01",nbs:tx.nbs||"1.2301.23.00",indOp:tx.indOp||"030102",
       descontoAtivo:tx.descontoAtivo===true,descontoTipo:tx.descontoTipo||"valor",descontoValor:tx.descontoValor||"",issMunicipal:tx.issMunicipal===true,descricaoServico:tx.descricaoServico||"",
       saveAsFav:false,
       beneficiarioNome:tx.beneficiarioNome||tx.nome||"",beneficiarioCpf:tx.beneficiarioCpf||"",
@@ -327,6 +327,7 @@ const handleSubmit=async()=>{
     const valor=parseBRL(form.valor); if(valor<=0){notify("Valor inválido.","err");return;}
     const normalizedData = normalizeDateOnly(form.data); if(!normalizedData){notify("Data inválida.","err");return;} const tx={id:editId||cryptoId(),tipo:formTipo,valor,data:normalizedData,nome:form.nome||form.categoria||(formTipo==="distribuicao"?"Distribuição de Lucros":""),cnpj:form.cnpj,telefone:form.telefone,cep:form.cep,endereco:form.endereco,email:form.email,especialidade:form.especialidade,dente:form.dente,categoria:form.categoria,descricao:form.descricao,notaGerada:form.notaGerada,numeroNota:form.notaGerada?form.numeroNota:"",dataEmissao:form.notaGerada?(normalizeDateOnly(form.dataEmissao)||""):"",taxaISS:form.notaGerada?form.taxaISS:"",informadoContab:form.notaGerada?form.informadoContab:false,
       recebido:formTipo==="receita"?form.recebido!==false:true,
+      municipioPrestacao:formTipo==="receita"?(form.municipioPrestacao||"Aracaju/SE"):"",
       cnae:formTipo==="receita"?(form.cnae||"8630-5/04"):"",
       codigoServico:formTipo==="receita"?(form.codigoServico||"04.12.01"):"",
       nbs:formTipo==="receita"?(form.nbs||"1.2301.23.00"):"",

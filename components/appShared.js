@@ -50,6 +50,7 @@ const createBlankForm = (date = new Date()) => ({
   notaGerada: false,
   numeroNota: "",
   recebido: false,
+  municipioPrestacao: "Aracaju/SE",
   cnae: "8630-5/04",
   codigoServico: "04.12.01",
   nbs: "1.2301.23.00",
