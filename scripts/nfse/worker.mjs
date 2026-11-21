@@ -57,8 +57,8 @@ async function clickVisibleOtpConfirm(page) {
   throw new Error('OTP_CONFIRM_BUTTON_NOT_FOUND')
 }
 
-async function waitForOtp(page) {
-  await setStatus('awaiting_otp')
+async function waitForOtp(page, { announce = true } = {}) {
+  if (announce) await setStatus('awaiting_otp')
   const deadline = Date.now() + 3 * 60 * 1000
 
   while (Date.now() < deadline) {
@@ -106,6 +106,37 @@ async function waitForOtp(page) {
     await page.waitForTimeout(2000)
   }
   throw new Error('OTP_TIMEOUT')
+}
+
+async function requestFreshOtp(page) {
+  const resend = page.getByRole('button', { name: /reenviar código/i })
+  const count = await resend.count()
+  for (let index = 0; index < count; index += 1) {
+    const button = resend.nth(index)
+    if (await button.isVisible().catch(() => false) && await button.isEnabled().catch(() => false)) {
+      await button.click({ timeout: 10000 })
+      await page.waitForTimeout(1200)
+      return
+    }
+  }
+  throw new Error('OTP_RESEND_BUTTON_NOT_AVAILABLE')
+}
+
+async function authenticateWithOtp(page) {
+  const maxAttempts = 2
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    await waitForOtp(page, { announce: attempt === 1 })
+    try {
+      return await waitForAuthenticationOutcome(page)
+    } catch (error) {
+      if (String(error?.message || '') !== 'OTP_REJECTED' || attempt === maxAttempts) throw error
+      // A rejeição pode indicar código vencido/substituído. Solicita um novo desafio
+      // na própria página e reabre a janela de envio sem reiniciar o workflow.
+      await requestFreshOtp(page)
+      await setStatus('awaiting_otp')
+    }
+  }
+  throw new Error('OTP_ATTEMPTS_EXHAUSTED')
 }
 
 async function inspectPage(page) {
@@ -180,9 +211,7 @@ try {
   await page.getByRole('button', { name: /^entrar$/i }).click()
 
   await page.getByText(/insira o código de verificação/i).waitFor({ state: 'visible', timeout: 30000 })
-  await waitForOtp(page)
-
-  diagnostic = await waitForAuthenticationOutcome(page)
+  diagnostic = await authenticateWithOtp(page)
   // Esta etapa confirma somente autenticação. Emissão permanece desabilitada.
   await setStatus('completed')
 } catch (error) {
