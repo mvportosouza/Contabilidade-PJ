@@ -55,8 +55,29 @@ export default async function handler(req, res) {
         status: 'queued',
         requested_count: selected.length,
         transaction_ids: selected.map((tx) => String(tx.id)),
-        payload: selected.map((tx) => ({ id: String(tx.id) })),
-        result: { phase: 'access_validation', issuance_enabled: false },
+        payload: selected.map((tx) => ({
+          id: String(tx.id),
+          // Snapshot fiscal protegido da execução; não depende de mudanças posteriores no lançamento.
+          cliente: {
+            nome: String(tx.nome || ''),
+            cnpj: String(tx.cnpj || ''),
+            email: String(tx.email || ''),
+            telefone: String(tx.telefone || ''),
+          },
+          municipioPrestacao: String(tx.municipioPrestacao || 'Aracaju/SE'),
+          valor: Number(tx.valor),
+          data: String(tx.data || ''),
+          cnae: String(tx.cnae || '8630-5/04'),
+          codigoServico: String(tx.codigoServico || '04.12.01'),
+          nbs: String(tx.nbs || '1.2301.23.00'),
+          indOp: String(tx.indOp || '030102'),
+          descontoAtivo: tx.descontoAtivo === true,
+          descontoTipo: String(tx.descontoTipo || 'valor'),
+          descontoValor: String(tx.descontoValor || ''),
+          issMunicipal: tx.issMunicipal === true,
+          descricaoServico: String(tx.descricaoServico || tx.descricao || ''),
+        })),
+        result: { phase: 'access_validation', municipality: 'Aracaju/SE', issuance_enabled: false },
       })
       .select('*')
       .single()
