@@ -32,6 +32,31 @@ async function setStatus(status, errorCode) {
   })
 }
 
+async function clickVisibleOtpConfirm(page) {
+  const buttons = page.getByRole('button', { name: /confirmar|verificar|validar|continuar|enviar/i })
+  const count = await buttons.count()
+
+  // Não usar .last(): a página pode conter botões duplicados/ocultos para outros layouts.
+  for (let index = 0; index < count; index += 1) {
+    const button = buttons.nth(index)
+    const visible = await button.isVisible().catch(() => false)
+    const enabled = await button.isEnabled().catch(() => false)
+    if (visible && enabled) {
+      await button.click({ timeout: 10000 })
+      return
+    }
+  }
+
+  // Fallback apenas se o formulário tiver um botão submit visível e habilitado.
+  const submit = page.locator('button[type="submit"]:visible').last()
+  if (await submit.count() && await submit.isEnabled().catch(() => false)) {
+    await submit.click({ timeout: 10000 })
+    return
+  }
+
+  throw new Error('OTP_CONFIRM_BUTTON_NOT_FOUND')
+}
+
 async function waitForOtp(page) {
   await setStatus('awaiting_otp')
   const deadline = Date.now() + 3 * 60 * 1000
@@ -75,9 +100,7 @@ async function waitForOtp(page) {
       }
 
       await setStatus('validating_access')
-      const confirm = page.getByRole('button', { name: /confirmar|verificar|validar|continuar|enviar/i }).last()
-      if (await confirm.isVisible().catch(() => false)) await confirm.click()
-      else await page.keyboard.press('Enter')
+      await clickVisibleOtpConfirm(page)
       return
     }
     await page.waitForTimeout(2000)
@@ -89,7 +112,12 @@ async function inspectPage(page) {
   const title = await page.title().catch(() => '')
   const url = page.url()
   const bodyText = (await page.locator('body').innerText({ timeout: 5000 }).catch(() => '')).slice(0, 5000)
-  return { title, url, bodyText }
+  const buttons = await page.locator('button:visible').evaluateAll(items => items.map(button => ({
+    text: (button.innerText || button.getAttribute('aria-label') || '').trim().slice(0, 100),
+    disabled: Boolean(button.disabled),
+    type: button.getAttribute('type') || '',
+  }))).catch(() => [])
+  return { title, url, bodyText, buttons }
 }
 
 async function waitForAuthenticationOutcome(page) {
@@ -125,7 +153,6 @@ async function waitForAuthenticationOutcome(page) {
       return state
     }
 
-    // Redirecionamento para uma rota diferente do login/OTP é sinal auxiliar, não prova isolada de autenticação.
     if (!otpStillVisible && !passwordStillVisible && !/login|sign.?in|autentica/i.test(new URL(state.url).pathname)) {
       return state
     }
@@ -162,6 +189,10 @@ try {
   const code = String(error?.message || 'WORKER_FAILED').replace(/[^A-Z0-9_:-]/gi, '_').slice(0, 80)
   if (page) {
     diagnostic = await inspectPage(page).catch(() => null)
+    // Remove qualquer OTP de campos antes da captura para não guardar códigos de autenticação no artefato.
+    await page.locator('input').evaluateAll(items => items.forEach(input => {
+      if (input.type !== 'password') input.value = ''
+    })).catch(() => {})
     await page.screenshot({ path: 'nfse-auth-failure.png', fullPage: true }).catch(() => {})
   }
   if (diagnostic) {
@@ -169,6 +200,7 @@ try {
       title: diagnostic.title,
       url: diagnostic.url,
       bodyText: diagnostic.bodyText,
+      visibleButtons: diagnostic.buttons,
       error: code,
     }))
   }
