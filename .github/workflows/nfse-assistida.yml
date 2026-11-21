@@ -46,3 +46,12 @@ jobs:
           NFSE_WORKER_BRIDGE_TOKEN: ${{ secrets.NFSE_WORKER_BRIDGE_TOKEN }}
           NFSE_RUN_ID: ${{ inputs.run_id }}
         run: node scripts/nfse/worker.mjs
+
+      - name: Upload authentication failure screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nfse-auth-diagnostics-${{ inputs.run_id }}
+          path: nfse-auth-failure.png
+          if-no-files-found: warn
+          retention-days: 3
