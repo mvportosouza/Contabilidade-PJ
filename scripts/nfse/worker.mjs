@@ -58,7 +58,9 @@ try{
   const job=await api(`/api/nfse/worker?runId=${encodeURIComponent(runId)}&action=claim`)
   const tx=job.payload?.[0]
   buildNfseDraft(tx)
-  await setStatus('preparing_draft')
+
+  // Keep the API state machine order: authenticating -> awaiting_otp -> validating_access.
+  // preparing_draft is only allowed after the authentication outcome is confirmed.
   browser=await chromium.launch({headless:true})
   const context=await browser.newContext({viewport:{width:1440,height:1000}})
   const page=await context.newPage()
@@ -67,7 +69,11 @@ try{
   await page.getByLabel(/senha/i).first().fill(job.credentials.password)
   await page.getByRole('button',{name:/^entrar$/i}).click()
   await page.getByText(/insira o código de verificação/i).waitFor({state:'visible',timeout:30000})
-  await waitForOtp(page); await waitAuth(page)
+  await waitForOtp(page)
+  await waitAuth(page)
+
+  // Current state is validating_access; this is the permitted next transition.
+  await setStatus('preparing_draft')
 
   // Discover possible menu controls without clicking any ambiguous item.
   const menuState=await inspectContabilizeiMenu(page)
@@ -76,8 +82,6 @@ try{
     await setStatus('preview_ready',{result:{phase:'menu_diagnostic',issuance_enabled:false,transaction_id:String(tx.id),invoice_form_detected:false,detected_fields:[],menu_candidates:menuState.candidates,menu_candidate_count:menuState.candidates.length,page_title:menuState.title,page_path:menuState.url}})
   } else {
     const candidate=menuState.candidates[0]
-    const locator=page.locator(`${candidate.tag}[${candidate.tag==='a'?'href':'role'}]`).filter({hasText:candidate.text}).first()
-    // Still do not click unless the unique visible candidate is an actual link with a path.
     if(candidate.tag!=='a'||!candidate.hrefPath){
       await setStatus('preview_ready',{result:{phase:'menu_diagnostic',issuance_enabled:false,transaction_id:String(tx.id),invoice_form_detected:false,detected_fields:[],menu_candidates:menuState.candidates,menu_candidate_count:1,page_title:menuState.title,page_path:menuState.url}})
     } else {
