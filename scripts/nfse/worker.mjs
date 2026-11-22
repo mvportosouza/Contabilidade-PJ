@@ -58,7 +58,9 @@ try{
   const job=await api(`/api/nfse/worker?runId=${encodeURIComponent(runId)}&action=claim`)
   const tx=job.payload?.[0]
   buildNfseDraft(tx) // validates eligibility and required source fields; no customer data is logged or returned
-  await setStatus('preparing_draft')
+
+  // Do not change to preparing_draft here: the run is still in authenticating.
+  // The allowed sequence is authenticating -> awaiting_otp -> validating_access.
   browser=await chromium.launch({headless:true})
   const context=await browser.newContext({viewport:{width:1440,height:1000}})
   const page=await context.newPage()
@@ -67,7 +69,13 @@ try{
   await page.getByLabel(/senha/i).first().fill(job.credentials.password)
   await page.getByRole('button',{name:/^entrar$/i}).click()
   await page.getByText(/insira o código de verificação/i).waitFor({state:'visible',timeout:30000})
-  await waitForOtp(page); await waitAuth(page)
+  await waitForOtp(page)
+  await waitAuth(page)
+
+  // Authentication has succeeded and the run is now validating_access.
+  // This is the permitted transition to preparing_draft.
+  await setStatus('preparing_draft')
+
   const menu=page.getByRole('link',{name:/notas fiscais/i})
   if(await menu.count()!==1||!await menu.first().isVisible().catch(()=>false))throw new Error('NFSE_MENU_LINK_NOT_UNIQUE')
   await menu.first().click(); await page.waitForLoadState('domcontentloaded').catch(()=>{})
