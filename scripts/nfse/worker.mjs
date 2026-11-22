@@ -1,6 +1,6 @@
 import { pathToFileURL } from 'node:url'
 import { buildNfseDraft } from './preview-mapping.mjs'
-import { inspectContabilizeiForm } from './contabilizei-preview.mjs'
+import { inspectContabilizeiForm, inspectContabilizeiMenu } from './contabilizei-preview.mjs'
 
 const playwrightEntry = process.env.NFSE_NODE_PATH ? pathToFileURL(`${process.env.NFSE_NODE_PATH}/playwright/index.mjs`).href : 'playwright'
 const { chromium } = await import(playwrightEntry)
@@ -53,35 +53,12 @@ async function waitAuth(page){
 function safeFieldNames(state){
   return (state.inputs||[]).map(x=>[x.tag,x.type,x.label,x.aria,x.placeholder,x.name].filter(Boolean).join(':').slice(0,120)).filter(Boolean).slice(0,40)
 }
-
-// Accept links, buttons and ARIA menu controls; click only a single unambiguous match.
-async function clickUniqueInteractive(page, pattern, errorCode, actionLabel) {
-  const controls = page.locator('a:visible, button:visible, [role="link"]:visible, [role="button"]:visible, [role="menuitem"]:visible')
-  const candidates = await controls.evaluateAll((items, source) => {
-    const re = new RegExp(source, 'i')
-    return items.map((el, index) => {
-      const text = (el.innerText || '').replace(/\s+/g, ' ').trim()
-      const aria = (el.getAttribute('aria-label') || '').trim()
-      const title = (el.getAttribute('title') || '').trim()
-      const label = [text, aria, title].filter(Boolean).join(' | ')
-      return { index, label: label.slice(0,140), tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '', href: el.getAttribute('href') || '' }
-    }).filter(item => re.test(item.label))
-  }, pattern.source)
-  if (candidates.length !== 1) {
-    console.error('[nfse.navigation]', JSON.stringify({ action:actionLabel, candidateCount:candidates.length, candidates:candidates.slice(0,10).map(({label,tag,role,href})=>({label,tag,role,href:href.slice(0,160)})) }))
-    throw new Error(errorCode)
-  }
-  const target = controls.nth(candidates[0].index)
-  if (!await target.isEnabled().catch(()=>true)) throw new Error(`${errorCode}_DISABLED`)
-  await target.click({timeout:15000})
-  return candidates[0]
-}
-
 let browser
 try{
   const job=await api(`/api/nfse/worker?runId=${encodeURIComponent(runId)}&action=claim`)
   const tx=job.payload?.[0]
   buildNfseDraft(tx)
+  await setStatus('preparing_draft')
   browser=await chromium.launch({headless:true})
   const context=await browser.newContext({viewport:{width:1440,height:1000}})
   const page=await context.newPage()
@@ -90,18 +67,30 @@ try{
   await page.getByLabel(/senha/i).first().fill(job.credentials.password)
   await page.getByRole('button',{name:/^entrar$/i}).click()
   await page.getByText(/insira o código de verificação/i).waitFor({state:'visible',timeout:30000})
-  await waitForOtp(page)
-  await waitAuth(page)
-  await setStatus('preparing_draft')
+  await waitForOtp(page); await waitAuth(page)
 
-  await clickUniqueInteractive(page, /notas?\s*fiscais/i, 'NFSE_MENU_LINK_NOT_UNIQUE', 'menu_notas_fiscais')
-  await page.waitForLoadState('domcontentloaded').catch(()=>{})
-  await page.waitForTimeout(800)
-  await clickUniqueInteractive(page, /nova nota|criar nota|iniciar emissão|nova emissão/i, 'NFSE_NEW_DRAFT_ACTION_NOT_UNIQUE', 'acao_nova_nota')
-  await page.waitForTimeout(1200)
-  const state=await inspectContabilizeiForm(page)
-  if(!state.invoiceFormDetected)throw new Error('CONTABILIZEI_INVOICE_FORM_NOT_DETECTED')
-  await setStatus('preview_ready',{result:{phase:'form_discovery',issuance_enabled:false,transaction_id:String(tx.id),invoice_form_detected:true,detected_fields:safeFieldNames(state)}})
+  // Discover possible menu controls without clicking any ambiguous item.
+  const menuState=await inspectContabilizeiMenu(page)
+  const unique=menuState.candidates.length===1
+  if(!unique){
+    await setStatus('preview_ready',{result:{phase:'menu_diagnostic',issuance_enabled:false,transaction_id:String(tx.id),invoice_form_detected:false,detected_fields:[],menu_candidates:menuState.candidates,menu_candidate_count:menuState.candidates.length,page_title:menuState.title,page_path:menuState.url}})
+  } else {
+    const candidate=menuState.candidates[0]
+    const locator=page.locator(`${candidate.tag}[${candidate.tag==='a'?'href':'role'}]`).filter({hasText:candidate.text}).first()
+    // Still do not click unless the unique visible candidate is an actual link with a path.
+    if(candidate.tag!=='a'||!candidate.hrefPath){
+      await setStatus('preview_ready',{result:{phase:'menu_diagnostic',issuance_enabled:false,transaction_id:String(tx.id),invoice_form_detected:false,detected_fields:[],menu_candidates:menuState.candidates,menu_candidate_count:1,page_title:menuState.title,page_path:menuState.url}})
+    } else {
+      const links=page.locator('a').filter({hasText:candidate.text})
+      if(await links.count()!==1||!await links.first().isVisible().catch(()=>false)){
+        await setStatus('preview_ready',{result:{phase:'menu_diagnostic',issuance_enabled:false,transaction_id:String(tx.id),invoice_form_detected:false,detected_fields:[],menu_candidates:menuState.candidates,menu_candidate_count:1,page_title:menuState.title,page_path:menuState.url}})
+      } else {
+        await links.first().click(); await page.waitForLoadState('domcontentloaded').catch(()=>{})
+        const state=await inspectContabilizeiForm(page)
+        await setStatus('preview_ready',{result:{phase:'form_discovery',issuance_enabled:false,transaction_id:String(tx.id),invoice_form_detected:state.invoiceFormDetected,detected_fields:safeFieldNames(state),menu_candidates:menuState.candidates,menu_candidate_count:1,page_title:state.title,page_path:state.url}})
+      }
+    }
+  }
 }catch(error){
   const code=String(error?.message||'WORKER_FAILED').replace(/[^A-Z0-9_:-]/gi,'_').slice(0,80)
   try{await setStatus('failed',{errorCode:code})}catch{}
