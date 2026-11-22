@@ -51,8 +51,9 @@ export default async function handler(req,res) {
       if(status==='failed') patch.error_code=String(req.body?.errorCode||'WORKER_FAILED').replace(/[^A-Z0-9_:-]/gi,'_').slice(0,80)
       if(status==='preview_ready') {
         const result=req.body?.result
-        if(!result || result.issuance_enabled !== false || result.phase !== 'form_discovery') return res.status(400).json({error:'INVALID_PREVIEW_RESULT'})
-        patch.result={phase:'form_discovery',issuance_enabled:false,transaction_id:String(result.transaction_id||''),detected_fields:Array.isArray(result.detected_fields)?result.detected_fields.slice(0,40):[],invoice_form_detected:result.invoice_form_detected===true}
+        if(!result || result.issuance_enabled !== false || !['form_discovery','menu_diagnostic'].includes(result.phase)) return res.status(400).json({error:'INVALID_PREVIEW_RESULT'})
+        const candidates=Array.isArray(result.menu_candidates)?result.menu_candidates.slice(0,30).map(item=>({tag:String(item.tag||'').slice(0,12),role:String(item.role||'').slice(0,40),text:String(item.text||'').slice(0,90),ariaLabel:String(item.ariaLabel||'').slice(0,90),title:String(item.title||'').slice(0,90),hrefPath:String(item.hrefPath||'').slice(0,160),testId:String(item.testId||'').slice(0,90),ariaCurrent:String(item.ariaCurrent||'').slice(0,30),parentTag:String(item.parentTag||'').slice(0,12),parentRole:String(item.parentRole||'').slice(0,40),visible:item.visible===true,disabled:item.disabled===true})):[]
+        patch.result={phase:result.phase,issuance_enabled:false,transaction_id:String(result.transaction_id||''),detected_fields:Array.isArray(result.detected_fields)?result.detected_fields.slice(0,40).map(x=>String(x).slice(0,120)):[],invoice_form_detected:result.invoice_form_detected===true,menu_candidate_count:Math.max(0,Math.min(30,Number(result.menu_candidate_count)||0)),menu_candidates:candidates,page_title:String(result.page_title||'').slice(0,120),page_path:String(result.page_path||'').slice(0,240)}
       }
       const {data,error}=await admin.from('nfse_automation_runs').update(patch).eq('id',runId).eq('status',current.status).select('id').maybeSingle()
       if(error) throw error
