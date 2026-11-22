@@ -1,240 +1,85 @@
 import { pathToFileURL } from 'node:url'
+import { buildNfseDraft } from './preview-mapping.mjs'
+import { inspectContabilizeiForm } from './contabilizei-preview.mjs'
 
-const playwrightEntry = process.env.NFSE_NODE_PATH
-  ? pathToFileURL(`${process.env.NFSE_NODE_PATH}/playwright/index.mjs`).href
-  : 'playwright'
+const playwrightEntry = process.env.NFSE_NODE_PATH ? pathToFileURL(`${process.env.NFSE_NODE_PATH}/playwright/index.mjs`).href : 'playwright'
 const { chromium } = await import(playwrightEntry)
-
 const baseUrl = process.env.NFSE_API_BASE_URL?.replace(/\/$/, '')
 const bridgeToken = process.env.NFSE_WORKER_BRIDGE_TOKEN
 const runId = process.env.NFSE_RUN_ID
-
 if (!baseUrl || !bridgeToken || !runId) throw new Error('NFSE_WORKER_ENV_MISSING')
 
 async function api(path, options = {}) {
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...options,
-    headers: {
-      'content-type': 'application/json',
-      'x-nfse-worker-token': bridgeToken,
-      ...(options.headers || {}),
-    },
-  })
+  const response = await fetch(`${baseUrl}${path}`, { ...options, headers: { 'content-type':'application/json', 'x-nfse-worker-token':bridgeToken, ...(options.headers||{}) } })
   const data = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(data.error || `NFSE_API_${response.status}`)
   return data
 }
+const setStatus = (status, extra = {}) => api('/api/nfse/worker', { method:'POST', body:JSON.stringify({ runId, status, ...extra }) })
 
-async function setStatus(status, errorCode) {
-  return api('/api/nfse/worker', {
-    method: 'POST',
-    body: JSON.stringify({ runId, status, errorCode }),
-  })
-}
-
-async function clickVisibleOtpConfirm(page) {
-  const buttons = page.getByRole('button', { name: /confirmar|verificar|validar|continuar|enviar/i })
-  const count = await buttons.count()
-
-  // Não usar .last(): a página pode conter botões duplicados/ocultos para outros layouts.
-  for (let index = 0; index < count; index += 1) {
-    const button = buttons.nth(index)
-    const visible = await button.isVisible().catch(() => false)
-    const enabled = await button.isEnabled().catch(() => false)
-    if (visible && enabled) {
-      await button.click({ timeout: 10000 })
-      return
-    }
-  }
-
-  // Fallback apenas se o formulário tiver um botão submit visível e habilitado.
-  const submit = page.locator('button[type="submit"]:visible').last()
-  if (await submit.count() && await submit.isEnabled().catch(() => false)) {
-    await submit.click({ timeout: 10000 })
-    return
-  }
-
+async function clickOtpConfirm(page) {
+  const buttons=page.getByRole('button',{name:/confirmar|verificar|validar|continuar|enviar/i})
+  for(let i=0,n=await buttons.count();i<n;i++) { const b=buttons.nth(i); if(await b.isVisible().catch(()=>false)&&await b.isEnabled().catch(()=>false)){await b.click({timeout:10000});return} }
   throw new Error('OTP_CONFIRM_BUTTON_NOT_FOUND')
 }
-
-async function waitForOtp(page, { announce = true } = {}) {
-  if (announce) await setStatus('awaiting_otp')
-  const deadline = Date.now() + 3 * 60 * 1000
-
-  while (Date.now() < deadline) {
-    const { code } = await api(`/api/nfse/worker?runId=${encodeURIComponent(runId)}&action=otp`)
-    if (code) {
-      const inputs = page.locator('input:visible')
-      const candidates = await inputs.count()
-      const otpInputs = []
-
-      for (let i = 0; i < candidates; i += 1) {
-        const input = inputs.nth(i)
-        const maxLength = await input.getAttribute('maxlength')
-        const inputType = await input.getAttribute('type')
-        const autocomplete = await input.getAttribute('autocomplete')
-        if (maxLength === '1' || autocomplete === 'one-time-code' || inputType === 'tel') {
-          otpInputs.push(input)
-        }
-      }
-
-      if (otpInputs.length >= 6) {
-        for (let i = 0; i < 6; i += 1) await otpInputs[i].fill(code[i])
-      } else {
-        const candidatesText = page.locator('input:visible, textarea:visible')
-        const count = await candidatesText.count()
-        let filled = false
-        for (let i = count - 1; i >= 0; i -= 1) {
-          const field = candidatesText.nth(i)
-          const type = await field.getAttribute('type')
-          const name = await field.getAttribute('name') || ''
-          const placeholder = await field.getAttribute('placeholder') || ''
-          if (type === 'password' || /senha|password/i.test(name + ' ' + placeholder)) continue
-          if (await field.isEditable().catch(() => false)) {
-            await field.fill(code)
-            filled = true
-            break
-          }
-        }
-        if (!filled) throw new Error('OTP_FIELD_NOT_FOUND')
-      }
-
-      await setStatus('validating_access')
-      await clickVisibleOtpConfirm(page)
-      return
+async function waitForOtp(page) {
+  await setStatus('awaiting_otp')
+  const deadline=Date.now()+180000
+  while(Date.now()<deadline){
+    const {code}=await api(`/api/nfse/worker?runId=${encodeURIComponent(runId)}&action=otp`)
+    if(code){
+      const inputs=page.locator('input:visible'), otp=[]
+      for(let i=0,n=await inputs.count();i<n;i++){const el=inputs.nth(i);if(await el.getAttribute('maxlength')==='1'||await el.getAttribute('autocomplete')==='one-time-code')otp.push(el)}
+      if(otp.length>=6){for(let i=0;i<6;i++)await otp[i].fill(code[i])}
+      else {let done=false;for(let i=(await inputs.count())-1;i>=0;i--){const el=inputs.nth(i);const meta=`${await el.getAttribute('name')||''} ${await el.getAttribute('placeholder')||''}`;if(/senha|password/i.test(meta)||await el.getAttribute('type')==='password')continue;if(await el.isEditable().catch(()=>false)){await el.fill(code);done=true;break}}if(!done)throw new Error('OTP_FIELD_NOT_FOUND')}
+      await setStatus('validating_access'); await clickOtpConfirm(page); return
     }
     await page.waitForTimeout(2000)
   }
   throw new Error('OTP_TIMEOUT')
 }
-
-async function requestFreshOtp(page) {
-  const resend = page.getByRole('button', { name: /reenviar código/i })
-  const count = await resend.count()
-  for (let index = 0; index < count; index += 1) {
-    const button = resend.nth(index)
-    if (await button.isVisible().catch(() => false) && await button.isEnabled().catch(() => false)) {
-      await button.click({ timeout: 10000 })
-      await page.waitForTimeout(1200)
-      return
-    }
-  }
-  throw new Error('OTP_RESEND_BUTTON_NOT_AVAILABLE')
-}
-
-async function authenticateWithOtp(page) {
-  const maxAttempts = 2
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    await waitForOtp(page, { announce: attempt === 1 })
-    try {
-      return await waitForAuthenticationOutcome(page)
-    } catch (error) {
-      if (String(error?.message || '') !== 'OTP_REJECTED' || attempt === maxAttempts) throw error
-      // A rejeição pode indicar código vencido/substituído. Solicita um novo desafio
-      // na própria página e reabre a janela de envio sem reiniciar o workflow.
-      await requestFreshOtp(page)
-      await setStatus('awaiting_otp')
-    }
-  }
-  throw new Error('OTP_ATTEMPTS_EXHAUSTED')
-}
-
-async function inspectPage(page) {
-  const title = await page.title().catch(() => '')
-  const url = page.url()
-  const bodyText = (await page.locator('body').innerText({ timeout: 5000 }).catch(() => '')).slice(0, 5000)
-  const buttons = await page.locator('button:visible').evaluateAll(items => items.map(button => ({
-    text: (button.innerText || button.getAttribute('aria-label') || '').trim().slice(0, 100),
-    disabled: Boolean(button.disabled),
-    type: button.getAttribute('type') || '',
-  }))).catch(() => [])
-  return { title, url, bodyText, buttons }
-}
-
-async function waitForAuthenticationOutcome(page) {
-  const deadline = Date.now() + 60000
-  const successPatterns = [
-    /central de rotinas/i,
-    /notas fiscais/i,
-    /dashboard/i,
-    /bem-vind[oa]/i,
-    /minha conta/i,
-    /visão geral/i,
-  ]
-  const rejectionPatterns = [
-    /código inválido/i,
-    /código expirado/i,
-    /não foi possível validar/i,
-    /código incorreto/i,
-  ]
-
-  while (Date.now() < deadline) {
-    const state = await inspectPage(page)
-    const normalized = state.bodyText.replace(/\s+/g, ' ').trim()
-
-    if (rejectionPatterns.some((pattern) => pattern.test(normalized))) {
-      throw new Error('OTP_REJECTED')
-    }
-
-    const otpStillVisible = await page.getByText(/insira o código de verificação|código de verificação/i).first()
-      .isVisible().catch(() => false)
-    const passwordStillVisible = await page.getByLabel(/senha/i).first().isVisible().catch(() => false)
-
-    if (!otpStillVisible && !passwordStillVisible && successPatterns.some((pattern) => pattern.test(normalized))) {
-      return state
-    }
-
-    if (!otpStillVisible && !passwordStillVisible && !/login|sign.?in|autentica/i.test(new URL(state.url).pathname)) {
-      return state
-    }
+async function waitAuth(page){
+  const deadline=Date.now()+60000
+  while(Date.now()<deadline){
+    const text=(await page.locator('body').innerText().catch(()=>'' )).replace(/\s+/g,' ')
+    if(/código inválido|código expirado|código incorreto|não foi possível validar/i.test(text))throw new Error('OTP_REJECTED')
+    const otp=await page.getByText(/insira o código de verificação|código de verificação/i).first().isVisible().catch(()=>false)
+    const pass=await page.getByLabel(/senha/i).first().isVisible().catch(()=>false)
+    if(!otp&&!pass&&!/login|sign.?in|autentica/i.test(new URL(page.url()).pathname))return
     await page.waitForTimeout(1500)
   }
-
   throw new Error('AUTH_OUTCOME_TIMEOUT')
 }
-
-let browser
-let page
-let diagnostic = null
-
-try {
-  const job = await api(`/api/nfse/worker?runId=${encodeURIComponent(runId)}&action=claim`)
-  browser = await chromium.launch({ headless: true })
-  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
-  page = await context.newPage()
-  await page.goto('https://app.contabilizei.com.br/', { waitUntil: 'domcontentloaded', timeout: 60000 })
-
-  const emailField = page.getByLabel(/usuário|e-mail|cpf/i).first()
-  const passwordField = page.getByLabel(/senha/i).first()
-  await emailField.fill(job.credentials.email)
-  await passwordField.fill(job.credentials.password)
-  await page.getByRole('button', { name: /^entrar$/i }).click()
-
-  await page.getByText(/insira o código de verificação/i).waitFor({ state: 'visible', timeout: 30000 })
-  diagnostic = await authenticateWithOtp(page)
-  // Esta etapa confirma somente autenticação. Emissão permanece desabilitada.
-  await setStatus('completed')
-} catch (error) {
-  const code = String(error?.message || 'WORKER_FAILED').replace(/[^A-Z0-9_:-]/gi, '_').slice(0, 80)
-  if (page) {
-    diagnostic = await inspectPage(page).catch(() => null)
-    // Remove qualquer OTP de campos antes da captura para não guardar códigos de autenticação no artefato.
-    await page.locator('input').evaluateAll(items => items.forEach(input => {
-      if (input.type !== 'password') input.value = ''
-    })).catch(() => {})
-    await page.screenshot({ path: 'nfse-auth-failure.png', fullPage: true }).catch(() => {})
-  }
-  if (diagnostic) {
-    console.error('[nfse.auth.diagnostic]', JSON.stringify({
-      title: diagnostic.title,
-      url: diagnostic.url,
-      bodyText: diagnostic.bodyText,
-      visibleButtons: diagnostic.buttons,
-      error: code,
-    }))
-  }
-  try { await setStatus('failed', code) } catch { /* preserve original failure */ }
-  process.exitCode = 1
-} finally {
-  if (browser) await browser.close().catch(() => {})
+function safeFieldNames(state){
+  return (state.inputs||[]).map(x=>[x.tag,x.type,x.label,x.aria,x.placeholder,x.name].filter(Boolean).join(':').slice(0,120)).filter(Boolean).slice(0,40)
 }
+let browser
+try{
+  const job=await api(`/api/nfse/worker?runId=${encodeURIComponent(runId)}&action=claim`)
+  const tx=job.payload?.[0]
+  buildNfseDraft(tx) // validates eligibility and required source fields; no customer data is logged or returned
+  await setStatus('preparing_draft')
+  browser=await chromium.launch({headless:true})
+  const context=await browser.newContext({viewport:{width:1440,height:1000}})
+  const page=await context.newPage()
+  await page.goto('https://app.contabilizei.com.br/',{waitUntil:'domcontentloaded',timeout:60000})
+  await page.getByLabel(/usuário|e-mail|cpf/i).first().fill(job.credentials.email)
+  await page.getByLabel(/senha/i).first().fill(job.credentials.password)
+  await page.getByRole('button',{name:/^entrar$/i}).click()
+  await page.getByText(/insira o código de verificação/i).waitFor({state:'visible',timeout:30000})
+  await waitForOtp(page); await waitAuth(page)
+  const menu=page.getByRole('link',{name:/notas fiscais/i})
+  if(await menu.count()!==1||!await menu.first().isVisible().catch(()=>false))throw new Error('NFSE_MENU_LINK_NOT_UNIQUE')
+  await menu.first().click(); await page.waitForLoadState('domcontentloaded').catch(()=>{})
+  const create=page.getByRole('button',{name:/nova nota|criar nota|iniciar emissão|nova emissão/i})
+  if(await create.count()!==1||!await create.first().isVisible().catch(()=>false))throw new Error('NFSE_NEW_DRAFT_ACTION_NOT_UNIQUE')
+  await create.first().click(); await page.waitForTimeout(1200)
+  const state=await inspectContabilizeiForm(page)
+  if(!state.invoiceFormDetected)throw new Error('CONTABILIZEI_INVOICE_FORM_NOT_DETECTED')
+  // Discovery only: deliberately do not fill any customer/service values until live selectors are verified.
+  await setStatus('preview_ready',{result:{phase:'form_discovery',issuance_enabled:false,transaction_id:String(tx.id),invoice_form_detected:true,detected_fields:safeFieldNames(state)}})
+}catch(error){
+  const code=String(error?.message||'WORKER_FAILED').replace(/[^A-Z0-9_:-]/gi,'_').slice(0,80)
+  try{await setStatus('failed',{errorCode:code})}catch{}
+  console.error('[nfse.discovery]',code); process.exitCode=1
+}finally{if(browser)await browser.close().catch(()=>{})}
