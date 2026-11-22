@@ -74,7 +74,7 @@ function App() {
   const hydratedRef = useRef(false);
 
   useEffect(()=>{
-    if (!nfseRun?.id || !['queued','authenticating','awaiting_otp','validating_access'].includes(nfseRun.status)) return;
+    if (!nfseRun?.id || !['queued','authenticating','awaiting_otp','validating_access','preparing_draft'].includes(nfseRun.status)) return;
     let alive = true;
     const poll = async () => {
       try {
@@ -295,7 +295,7 @@ function App() {
   const openEdit=tx=>{
     setEditId(tx.id);setFormTipo(tx.tipo);
     setForm({valor:fmtIn(String(Math.round(tx.valor*100))),data:tx.data,nome:tx.nome||"",cnpj:tx.cnpj||"",telefone:tx.telefone||"",cep:tx.cep||"",endereco:tx.endereco||"",email:tx.email||"",especialidade:tx.especialidade||"",dente:tx.dente||"",categoria:tx.categoria||"",descricao:tx.descricao||"",notaGerada:tx.notaGerada||false,numeroNota:tx.numeroNota||"",dataEmissao:tx.dataEmissao||"",taxaISS:tx.taxaISS||"",informadoContab:tx.informadoContab||false,recebido:tx.recebido!==false,
-      municipioPrestacao:tx.municipioPrestacao||"Aracaju/SE",cnae:tx.cnae||"8630-5/04",codigoServico:tx.codigoServico||"04.12.01",nbs:tx.nbs||"1.2301.23.00",indOp:tx.indOp||"030102",
+      cnae:tx.cnae||"8630-5/04",codigoServico:tx.codigoServico||"04.12.01",nbs:tx.nbs||"1.2301.23.00",indOp:tx.indOp||"030102",
       descontoAtivo:tx.descontoAtivo===true,descontoTipo:tx.descontoTipo||"valor",descontoValor:tx.descontoValor||"",issMunicipal:tx.issMunicipal===true,descricaoServico:tx.descricaoServico||"",
       saveAsFav:false,
       beneficiarioNome:tx.beneficiarioNome||tx.nome||"",beneficiarioCpf:tx.beneficiarioCpf||"",
@@ -327,7 +327,6 @@ const handleSubmit=async()=>{
     const valor=parseBRL(form.valor); if(valor<=0){notify("Valor inválido.","err");return;}
     const normalizedData = normalizeDateOnly(form.data); if(!normalizedData){notify("Data inválida.","err");return;} const tx={id:editId||cryptoId(),tipo:formTipo,valor,data:normalizedData,nome:form.nome||form.categoria||(formTipo==="distribuicao"?"Distribuição de Lucros":""),cnpj:form.cnpj,telefone:form.telefone,cep:form.cep,endereco:form.endereco,email:form.email,especialidade:form.especialidade,dente:form.dente,categoria:form.categoria,descricao:form.descricao,notaGerada:form.notaGerada,numeroNota:form.notaGerada?form.numeroNota:"",dataEmissao:form.notaGerada?(normalizeDateOnly(form.dataEmissao)||""):"",taxaISS:form.notaGerada?form.taxaISS:"",informadoContab:form.notaGerada?form.informadoContab:false,
       recebido:formTipo==="receita"?form.recebido!==false:true,
-      municipioPrestacao:formTipo==="receita"?(form.municipioPrestacao||"Aracaju/SE"):"",
       cnae:formTipo==="receita"?(form.cnae||"8630-5/04"):"",
       codigoServico:formTipo==="receita"?(form.codigoServico||"04.12.01"):"",
       nbs:formTipo==="receita"?(form.nbs||"1.2301.23.00"):"",
@@ -1007,7 +1006,7 @@ const handleSubmit=async()=>{
               </div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
                 {notaModal==="pendentes" && cfg.lista.length>0 && (
-                  <button onClick={startNfseAutomation} disabled={nfseBusy || ['queued','authenticating','awaiting_otp','validating_access'].includes(nfseRun?.status)}
+                  <button onClick={startNfseAutomation} disabled={nfseBusy || ['queued','authenticating','awaiting_otp','validating_access','preparing_draft'].includes(nfseRun?.status)}
                     style={{background:C.orange||"#E67E22",color:"white",border:"none",borderRadius:12,padding:"10px 14px",fontSize:12,fontWeight:700,fontFamily:"inherit",cursor:nfseBusy?"wait":"pointer",whiteSpace:"nowrap",opacity:nfseBusy?0.65:1}}>
                     {nfseBusy?"Aguarde…":"Emitir Nota"}
                   </button>
@@ -1019,7 +1018,7 @@ const handleSubmit=async()=>{
               <div style={{background:"#FFF8F0",border:"1px solid #F2D2B2",borderRadius:12,padding:12,marginBottom:12}}>
                 <p style={{margin:"0 0 6px",fontSize:13,fontWeight:700,color:C.text}}>Validação de acesso à Contabilizei</p>
                 {nfseRun && <p style={{margin:0,fontSize:12,color:C.muted}}>
-                  {nfseRun.status==="queued"?"Preparando acesso…":nfseRun.status==="authenticating"?"Acessando a Contabilizei…":nfseRun.status==="awaiting_otp"?"Informe o código de seis dígitos enviado ao seu e-mail.":nfseRun.status==="validating_access"?"Código recebido. Validando acesso…":nfseRun.status==="completed"?"Acesso validado. Esta etapa não emitiu nenhuma nota fiscal.":nfseRun.status==="failed"?"Não foi possível validar o acesso. Você pode iniciar novamente.":"Processo de autenticação."}
+                  {nfseRun.status==="queued"?"Preparando acesso…":nfseRun.status==="authenticating"?"Acessando a Contabilizei…":nfseRun.status==="awaiting_otp"?"Informe o código de seis dígitos enviado ao seu e-mail.":nfseRun.status==="validating_access"?"Código recebido. Validando acesso…":nfseRun.status==="preparing_draft"?"Acessando a área de notas para verificar o formulário…":nfseRun.status==="preview_ready"?"Formulário localizado. Nenhum dado foi preenchido e nenhuma nota foi emitida.":nfseRun.status==="completed"?"Acesso validado. Esta etapa não emitiu nenhuma nota fiscal.":nfseRun.status==="failed"?"Não foi possível validar o acesso. Você pode iniciar novamente.":"Processo de autenticação."}
                 </p>}
                 {nfseRun?.status==="awaiting_otp" && (
                   <div style={{display:"flex",gap:8,marginTop:10}}>
