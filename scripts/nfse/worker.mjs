@@ -53,14 +53,35 @@ async function waitAuth(page){
 function safeFieldNames(state){
   return (state.inputs||[]).map(x=>[x.tag,x.type,x.label,x.aria,x.placeholder,x.name].filter(Boolean).join(':').slice(0,120)).filter(Boolean).slice(0,40)
 }
+
+// Accept links, buttons and ARIA menu controls; click only a single unambiguous match.
+async function clickUniqueInteractive(page, pattern, errorCode, actionLabel) {
+  const controls = page.locator('a:visible, button:visible, [role="link"]:visible, [role="button"]:visible, [role="menuitem"]:visible')
+  const candidates = await controls.evaluateAll((items, source) => {
+    const re = new RegExp(source, 'i')
+    return items.map((el, index) => {
+      const text = (el.innerText || '').replace(/\s+/g, ' ').trim()
+      const aria = (el.getAttribute('aria-label') || '').trim()
+      const title = (el.getAttribute('title') || '').trim()
+      const label = [text, aria, title].filter(Boolean).join(' | ')
+      return { index, label: label.slice(0,140), tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '', href: el.getAttribute('href') || '' }
+    }).filter(item => re.test(item.label))
+  }, pattern.source)
+  if (candidates.length !== 1) {
+    console.error('[nfse.navigation]', JSON.stringify({ action:actionLabel, candidateCount:candidates.length, candidates:candidates.slice(0,10).map(({label,tag,role,href})=>({label,tag,role,href:href.slice(0,160)})) }))
+    throw new Error(errorCode)
+  }
+  const target = controls.nth(candidates[0].index)
+  if (!await target.isEnabled().catch(()=>true)) throw new Error(`${errorCode}_DISABLED`)
+  await target.click({timeout:15000})
+  return candidates[0]
+}
+
 let browser
 try{
   const job=await api(`/api/nfse/worker?runId=${encodeURIComponent(runId)}&action=claim`)
   const tx=job.payload?.[0]
-  buildNfseDraft(tx) // validates eligibility and required source fields; no customer data is logged or returned
-
-  // Do not change to preparing_draft here: the run is still in authenticating.
-  // The allowed sequence is authenticating -> awaiting_otp -> validating_access.
+  buildNfseDraft(tx)
   browser=await chromium.launch({headless:true})
   const context=await browser.newContext({viewport:{width:1440,height:1000}})
   const page=await context.newPage()
@@ -71,20 +92,15 @@ try{
   await page.getByText(/insira o código de verificação/i).waitFor({state:'visible',timeout:30000})
   await waitForOtp(page)
   await waitAuth(page)
-
-  // Authentication has succeeded and the run is now validating_access.
-  // This is the permitted transition to preparing_draft.
   await setStatus('preparing_draft')
 
-  const menu=page.getByRole('link',{name:/notas fiscais/i})
-  if(await menu.count()!==1||!await menu.first().isVisible().catch(()=>false))throw new Error('NFSE_MENU_LINK_NOT_UNIQUE')
-  await menu.first().click(); await page.waitForLoadState('domcontentloaded').catch(()=>{})
-  const create=page.getByRole('button',{name:/nova nota|criar nota|iniciar emissão|nova emissão/i})
-  if(await create.count()!==1||!await create.first().isVisible().catch(()=>false))throw new Error('NFSE_NEW_DRAFT_ACTION_NOT_UNIQUE')
-  await create.first().click(); await page.waitForTimeout(1200)
+  await clickUniqueInteractive(page, /notas?\s*fiscais/i, 'NFSE_MENU_LINK_NOT_UNIQUE', 'menu_notas_fiscais')
+  await page.waitForLoadState('domcontentloaded').catch(()=>{})
+  await page.waitForTimeout(800)
+  await clickUniqueInteractive(page, /nova nota|criar nota|iniciar emissão|nova emissão/i, 'NFSE_NEW_DRAFT_ACTION_NOT_UNIQUE', 'acao_nova_nota')
+  await page.waitForTimeout(1200)
   const state=await inspectContabilizeiForm(page)
   if(!state.invoiceFormDetected)throw new Error('CONTABILIZEI_INVOICE_FORM_NOT_DETECTED')
-  // Discovery only: deliberately do not fill any customer/service values until live selectors are verified.
   await setStatus('preview_ready',{result:{phase:'form_discovery',issuance_enabled:false,transaction_id:String(tx.id),invoice_form_detected:true,detected_fields:safeFieldNames(state)}})
 }catch(error){
   const code=String(error?.message||'WORKER_FAILED').replace(/[^A-Z0-9_:-]/gi,'_').slice(0,80)
