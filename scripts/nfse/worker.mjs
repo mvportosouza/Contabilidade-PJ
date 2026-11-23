@@ -53,6 +53,16 @@ async function waitAuth(page){
 function safeFieldNames(state){
   return (state.inputs||[]).map(x=>[x.tag,x.type,x.label,x.aria,x.placeholder,x.name].filter(Boolean).join(':').slice(0,120)).filter(Boolean).slice(0,40)
 }
+async function closeKnownAccountPanel(page) {
+  const close = page.locator('[data-testid="box-conta-usuario-fechar"]')
+  const count = await close.count().catch(() => 0)
+  if (count !== 1) return { attempted:false, closed:false, reason:`exact_close_control_count_${count}` }
+  if (!await close.isVisible().catch(() => false)) return { attempted:false, closed:false, reason:'exact_close_control_not_visible' }
+  await close.click({ timeout:8000 })
+  await page.waitForTimeout(500)
+  const stillVisible = await close.isVisible().catch(() => false)
+  return { attempted:true, closed:!stillVisible, reason:stillVisible?'panel_still_visible':'closed_by_exact_testid' }
+}
 let browser
 try{
   const job=await api(`/api/nfse/worker?runId=${encodeURIComponent(runId)}&action=claim`)
@@ -70,14 +80,16 @@ try{
   await waitAuth(page)
   await setStatus('preparing_draft')
 
-  // Do not guess which icon opens navigation. Collect every visible navigation
-  // control with stable metadata first; next step will use the exact control.
+  // The last real Supabase run identified this exact open account drawer and
+  // its unique close control. Close only that drawer, then inspect main navigation.
+  const panelClose = await closeKnownAccountPanel(page)
   const state=await inspectContabilizeiMenu(page)
   const form=await inspectContabilizeiForm(page)
   await setStatus('preview_ready',{result:{
-    phase:'menu_diagnostic',
+    phase:panelClose.closed?'main_navigation_diagnostic':'account_panel_diagnostic',
     issuance_enabled:false,
     transaction_id:String(tx.id),
+    account_panel_close:panelClose,
     invoice_form_detected:form.invoiceFormDetected,
     detected_fields:safeFieldNames(form),
     menu_candidate_count:state.candidates.length,
