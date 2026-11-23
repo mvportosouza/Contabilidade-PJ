@@ -1,22 +1,22 @@
 /**
  * Contabilizei read-only discovery helpers.
- * Never reads or persists customer form values; never submits or emits an invoice.
+ * Reads only visible control metadata and never captures customer form values.
  */
-const MENU_TERM = /nota\s*fiscal|notas\s*fiscais|fiscal/i
+const clean = (value, max = 90) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, max)
 
 export async function inspectContabilizeiMenu(page) {
   const pageInfo = {
     title: (await page.title().catch(() => '')).slice(0, 120),
     url: (() => { try { const u = new URL(page.url()); return `${u.origin}${u.pathname}`.slice(0, 240) } catch { return '' } })(),
   }
-  const candidates = await page.locator('a,button,[role="link"],[role="button"],[role="menuitem"],nav li,[data-testid]').evaluateAll((nodes) => {
-    const term = /nota\s*fiscal|notas\s*fiscais|fiscal/i
-    const visible = (el) => {
+
+  const candidates = await page.locator('a,button,[role="link"],[role="button"],[role="menuitem"],[data-testid]').evaluateAll(nodes => {
+    const visible = el => {
       const style = window.getComputedStyle(el)
       const rect = el.getBoundingClientRect()
       return style && style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0
     }
-    const clean = (value, max = 90) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, max)
+    const cleanText = (value, max = 90) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, max)
     const output = []
     const seen = new Set()
     for (const original of nodes) {
@@ -26,29 +26,29 @@ export async function inspectContabilizeiMenu(page) {
         target = original.closest('a,button,[role="link"],[role="button"],[role="menuitem"]') || original
       }
       if (!visible(target)) continue
-      const text = clean(target.innerText || target.textContent)
-      const aria = clean(target.getAttribute('aria-label'))
-      const title = clean(target.getAttribute('title'))
-      const testId = clean(target.getAttribute('data-testid'))
+      const text = cleanText(target.innerText || target.textContent)
+      const aria = cleanText(target.getAttribute('aria-label'))
+      const title = cleanText(target.getAttribute('title'))
+      const testId = cleanText(target.getAttribute('data-testid'))
       const href = target.getAttribute('href') || ''
       let hrefPath = ''
       try { if (href) hrefPath = new URL(href, location.href).pathname.slice(0, 160) } catch {}
       const searchable = `${text} ${aria} ${title} ${testId} ${hrefPath}`
-      if (!term.test(searchable)) continue
+      if (!/nota|fiscal|menu|navega|fechar|close|depois|agora não|certificado|sidebar|navigation/i.test(searchable)) continue
       const key = `${target.tagName}|${text}|${aria}|${hrefPath}|${testId}`
       if (seen.has(key)) continue
       seen.add(key)
       output.push({
         tag: target.tagName.toLowerCase(),
-        role: clean(target.getAttribute('role'), 40),
+        role: cleanText(target.getAttribute('role'), 40),
         text,
         ariaLabel: aria,
         title,
         hrefPath,
         testId,
-        ariaCurrent: clean(target.getAttribute('aria-current'), 30),
+        ariaCurrent: cleanText(target.getAttribute('aria-current'), 30),
         parentTag: target.parentElement?.tagName?.toLowerCase() || '',
-        parentRole: clean(target.parentElement?.getAttribute('role'), 40),
+        parentRole: cleanText(target.parentElement?.getAttribute('role'), 40),
         visible: true,
         disabled: Boolean(target.disabled || target.getAttribute('aria-disabled') === 'true'),
       })
@@ -56,7 +56,38 @@ export async function inspectContabilizeiMenu(page) {
     }
     return output
   }).catch(() => [])
-  return { ...pageInfo, candidates }
+
+  const certificateModal = page.locator('[data-testid="container-modal-certificado-digital"]')
+  const modalVisible = await certificateModal.isVisible().catch(() => false)
+  const dismiss = []
+  if (modalVisible) {
+    const controls = certificateModal.locator('button,[role="button"],[aria-label],[title]')
+    const count = await controls.count().catch(() => 0)
+    for (let i = 0; i < count; i++) {
+      const el = controls.nth(i)
+      if (!await el.isVisible().catch(() => false)) continue
+      const meta = [
+        await el.innerText().catch(() => ''),
+        await el.getAttribute('aria-label').catch(() => ''),
+        await el.getAttribute('title').catch(() => ''),
+        await el.getAttribute('data-testid').catch(() => ''),
+      ].join(' ').replace(/\s+/g, ' ').trim()
+      if (/^(fechar|close|agora não|depois|dispensar|continuar sem certificado|x)$/i.test(meta)) dismiss.push(el)
+    }
+  }
+
+  return {
+    ...pageInfo,
+    candidates,
+    certificateModalVisible: modalVisible,
+    certificateModalDismissCount: dismiss.length,
+    dismissCertificateModal: async () => {
+      if (dismiss.length !== 1) return false
+      await dismiss[0].click({ timeout: 8000 })
+      await page.waitForTimeout(500)
+      return !(await certificateModal.isVisible().catch(() => false))
+    },
+  }
 }
 
 export async function inspectContabilizeiForm(page) {

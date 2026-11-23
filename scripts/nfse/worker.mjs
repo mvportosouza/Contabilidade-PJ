@@ -53,14 +53,40 @@ async function waitAuth(page){
 function safeFieldNames(state){
   return (state.inputs||[]).map(x=>[x.tag,x.type,x.label,x.aria,x.placeholder,x.name].filter(Boolean).join(':').slice(0,120)).filter(Boolean).slice(0,40)
 }
+function previewResult(tx, phase, menuState, extra = {}) {
+  return {
+    phase,
+    issuance_enabled:false,
+    transaction_id:String(tx.id),
+    invoice_form_detected:extra.invoice_form_detected===true,
+    detected_fields:extra.detected_fields||[],
+    menu_candidate_count:menuState.candidates.length,
+    menu_candidates:menuState.candidates,
+    page_title:extra.page_title||menuState.title,
+    page_path:extra.page_path||menuState.url,
+  }
+}
+async function clickExactControl(page, textPattern, errorCode) {
+  const controls=page.locator('a:visible,button:visible,[role="link"]:visible,[role="button"]:visible,[role="menuitem"]:visible')
+  const matches=[]
+  const count=await controls.count()
+  for(let i=0;i<count;i++){
+    const el=controls.nth(i)
+    const label=[await el.innerText().catch(()=>''),await el.getAttribute('aria-label').catch(()=>''),await el.getAttribute('title').catch(()=>'' )].join(' ').replace(/\s+/g,' ').trim()
+    if(textPattern.test(label)) matches.push({el,label})
+  }
+  if(matches.length!==1) throw new Error(`${errorCode}:${matches.length}`)
+  if(!await matches[0].el.isEnabled().catch(()=>true)) throw new Error(`${errorCode}_DISABLED`)
+  await matches[0].el.click({timeout:12000})
+  await page.waitForTimeout(700)
+  return matches[0].label.slice(0,120)
+}
 let browser
 try{
   const job=await api(`/api/nfse/worker?runId=${encodeURIComponent(runId)}&action=claim`)
   const tx=job.payload?.[0]
   buildNfseDraft(tx)
 
-  // Keep the API state machine order: authenticating -> awaiting_otp -> validating_access.
-  // preparing_draft is only allowed after the authentication outcome is confirmed.
   browser=await chromium.launch({headless:true})
   const context=await browser.newContext({viewport:{width:1440,height:1000}})
   const page=await context.newPage()
@@ -71,28 +97,51 @@ try{
   await page.getByText(/insira o código de verificação/i).waitFor({state:'visible',timeout:30000})
   await waitForOtp(page)
   await waitAuth(page)
-
-  // Current state is validating_access; this is the permitted next transition.
   await setStatus('preparing_draft')
 
-  // Discover possible menu controls without clicking any ambiguous item.
-  const menuState=await inspectContabilizeiMenu(page)
-  const unique=menuState.candidates.length===1
-  if(!unique){
-    await setStatus('preview_ready',{result:{phase:'menu_diagnostic',issuance_enabled:false,transaction_id:String(tx.id),invoice_form_detected:false,detected_fields:[],menu_candidates:menuState.candidates,menu_candidate_count:menuState.candidates.length,page_title:menuState.title,page_path:menuState.url}})
-  } else {
-    const candidate=menuState.candidates[0]
-    if(candidate.tag!=='a'||!candidate.hrefPath){
-      await setStatus('preview_ready',{result:{phase:'menu_diagnostic',issuance_enabled:false,transaction_id:String(tx.id),invoice_form_detected:false,detected_fields:[],menu_candidates:menuState.candidates,menu_candidate_count:1,page_title:menuState.title,page_path:menuState.url}})
+  // Contabilizei may show a certificate promotion modal. It is not an instruction
+  // to use the city-hall issuance path. Dismiss only via a uniquely labelled close/defer control.
+  let menuState=await inspectContabilizeiMenu(page)
+  if(menuState.certificateModalVisible){
+    const dismissed=await menuState.dismissCertificateModal()
+    if(!dismissed){
+      await setStatus('preview_ready',{result:previewResult(tx,'menu_diagnostic',menuState)})
+      process.exitCode=0
     } else {
-      const links=page.locator('a').filter({hasText:candidate.text})
-      if(await links.count()!==1||!await links.first().isVisible().catch(()=>false)){
-        await setStatus('preview_ready',{result:{phase:'menu_diagnostic',issuance_enabled:false,transaction_id:String(tx.id),invoice_form_detected:false,detected_fields:[],menu_candidates:menuState.candidates,menu_candidate_count:1,page_title:menuState.title,page_path:menuState.url}})
-      } else {
-        await links.first().click(); await page.waitForLoadState('domcontentloaded').catch(()=>{})
-        const state=await inspectContabilizeiForm(page)
-        await setStatus('preview_ready',{result:{phase:'form_discovery',issuance_enabled:false,transaction_id:String(tx.id),invoice_form_detected:state.invoiceFormDetected,detected_fields:safeFieldNames(state),menu_candidates:menuState.candidates,menu_candidate_count:1,page_title:state.title,page_path:state.url}})
-      }
+      menuState=await inspectContabilizeiMenu(page)
+    }
+  }
+
+  if(!menuState.certificateModalVisible){
+    // The user's supplied screenshots show the platform's own navigation:
+    // open the navigation menu, then select "Emitir nota fiscal".
+    const menuTriggers=page.locator('button[aria-label*="menu" i],button[title*="menu" i],[data-testid*="menu" i]:visible,[aria-label*="navega" i]:visible')
+    const triggerCount=await menuTriggers.count().catch(()=>0)
+    if(triggerCount===1 && await menuTriggers.first().isVisible().catch(()=>false)){
+      await menuTriggers.first().click({timeout:8000})
+      await page.waitForTimeout(500)
+    }
+
+    const issueLink=page.getByText(/^Emitir nota fiscal$/i)
+    const issueCount=await issueLink.count().catch(()=>0)
+    if(issueCount===1 && await issueLink.first().isVisible().catch(()=>false)){
+      await issueLink.first().click({timeout:10000})
+      await page.waitForLoadState('domcontentloaded').catch(()=>{})
+      await page.waitForTimeout(700)
+    }
+
+    // The next screen from the supplied screenshots has an explicit "Emitir nova nota" action.
+    const newInvoice=page.getByRole('button',{name:/^emitir nova nota$/i})
+    const newCount=await newInvoice.count().catch(()=>0)
+    if(newCount===1 && await newInvoice.first().isVisible().catch(()=>false)){
+      await newInvoice.first().click({timeout:10000})
+      await page.waitForTimeout(1000)
+      const form=await inspectContabilizeiForm(page)
+      const finalMenu=await inspectContabilizeiMenu(page)
+      await setStatus('preview_ready',{result:previewResult(tx,'form_discovery',finalMenu,{invoice_form_detected:form.invoiceFormDetected,detected_fields:safeFieldNames(form),page_title:form.title,page_path:form.url})})
+    } else {
+      const finalMenu=await inspectContabilizeiMenu(page)
+      await setStatus('preview_ready',{result:previewResult(tx,'menu_diagnostic',finalMenu)})
     }
   }
 }catch(error){
