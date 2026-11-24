@@ -251,10 +251,10 @@ try {
     await page.waitForTimeout(500)
     const form = await inspectContabilizeiForm(page)
     if (!form.invoiceFormDetected) {
-      await saveMenuDiagnostic(tx, page, 'form_not_detected_after_customer_selection', {
+      await saveMenuDiagnostic(tx, page, 'form_not_detected', {
         billing_notice:billingNotice,
         expected_route:'/emissor/emitir',
-        actual_url:page.url(),
+        actual_route:form.url || page.url(),
       })
     } else {
       const state = await inspectContabilizeiMenu(page)

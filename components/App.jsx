@@ -74,7 +74,7 @@ function App() {
   const hydratedRef = useRef(false);
 
   useEffect(()=>{
-    if (!nfseRun?.id || !['queued','authenticating','awaiting_otp','validating_access','preparing_draft'].includes(nfseRun.status)) return;
+    if (!nfseRun?.id || !['queued','authenticating','awaiting_otp','validating_access','preparing_draft','preview_ready'].includes(nfseRun.status)) return;
     let alive = true;
     const poll = async () => {
       try {
@@ -1006,7 +1006,7 @@ const handleSubmit=async()=>{
               </div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
                 {notaModal==="pendentes" && cfg.lista.length>0 && (
-                  <button onClick={startNfseAutomation} disabled={nfseBusy || ['queued','authenticating','awaiting_otp','validating_access','preparing_draft'].includes(nfseRun?.status)}
+                  <button onClick={startNfseAutomation} disabled={nfseBusy || ['queued','authenticating','awaiting_otp','validating_access','preparing_draft','preview_ready'].includes(nfseRun?.status)}
                     style={{background:C.orange||"#E67E22",color:"white",border:"none",borderRadius:12,padding:"10px 14px",fontSize:12,fontWeight:700,fontFamily:"inherit",cursor:nfseBusy?"wait":"pointer",whiteSpace:"nowrap",opacity:nfseBusy?0.65:1}}>
                     {nfseBusy?"Aguarde…":"Emitir Nota"}
                   </button>
@@ -1018,7 +1018,7 @@ const handleSubmit=async()=>{
               <div style={{background:"#FFF8F0",border:"1px solid #F2D2B2",borderRadius:12,padding:12,marginBottom:12}}>
                 <p style={{margin:"0 0 6px",fontSize:13,fontWeight:700,color:C.text}}>Validação de acesso à Contabilizei</p>
                 {nfseRun && <p style={{margin:0,fontSize:12,color:C.muted}}>
-                  {nfseRun.status==="queued"?"Preparando acesso…":nfseRun.status==="authenticating"?"Acessando a Contabilizei…":nfseRun.status==="awaiting_otp"?"Informe o código de seis dígitos enviado ao seu e-mail.":nfseRun.status==="validating_access"?"Código recebido. Validando acesso…":nfseRun.status==="preparing_draft"?"Acessando a área de notas para verificar o formulário…":nfseRun.status==="preview_ready"?(nfseRun.result?.phase==="menu_diagnostic"?`Diagnóstico do menu concluído: ${nfseRun.result?.menu_candidate_count ?? 0} elemento(s) identificado(s). Nenhum dado foi preenchido e nenhuma nota foi emitida.`:"Formulário localizado. Nenhum dado foi preenchido e nenhuma nota foi emitida."):nfseRun.status==="completed"?"Acesso validado. Esta etapa não emitiu nenhuma nota fiscal.":nfseRun.status==="failed"?"Não foi possível validar o acesso. Você pode iniciar novamente.":"Processo de autenticação."}
+                  {nfseRun.status==="queued"?"Preparando acesso…":nfseRun.status==="authenticating"?"Acessando a Contabilizei…":nfseRun.status==="awaiting_otp"?"Informe o código de seis dígitos enviado ao seu e-mail.":nfseRun.status==="validating_access"?"Código recebido. Validando acesso…":nfseRun.status==="preparing_draft"?"Acessando a área de notas para verificar o formulário…":nfseRun.status==="preview_ready"?(nfseRun.result?.phase==="menu_diagnostic"?`Diagnóstico do menu concluído: ${nfseRun.result?.menu_candidate_count ?? 0} elemento(s) identificado(s). Nenhum dado foi preenchido e nenhuma nota foi emitida.`:nfseRun.result?.phase==="form_not_detected"?"Cliente localizado, mas o formulário não foi reconhecido. Nenhum dado foi preenchido e nenhuma nota foi emitida.":"Formulário localizado. Nenhum dado foi preenchido e nenhuma nota foi emitida."):nfseRun.status==="completed"?"Acesso validado. Esta etapa não emitiu nenhuma nota fiscal.":nfseRun.status==="failed"?"Não foi possível validar o acesso. Você pode iniciar novamente.":"Processo de autenticação."}
                 </p>}
                 {nfseRun?.status==="awaiting_otp" && (
                   <div style={{display:"flex",gap:8,marginTop:10}}>
