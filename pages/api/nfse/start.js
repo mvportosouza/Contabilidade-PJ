@@ -1,7 +1,7 @@
 import { getAdminClient, getAuthenticatedUser, publicRun } from '../../../lib/nfseServer'
 
-// preview_ready continua sendo uma execução aberta até o usuário fechar a prévia.
-const ACTIVE = ['queued', 'authenticating', 'awaiting_otp', 'validating_access', 'preparing_draft', 'preview_ready']
+// preview_ready representa uma prévia concluída; não bloqueia uma nova execução.
+const ACTIVE = ['queued', 'authenticating', 'awaiting_otp', 'validating_access', 'preparing_draft']
 const eligible = (tx, competence) => tx?.tipo === 'receita' && tx?.recebido !== false && tx?.notaGerada !== true && typeof tx?.data === 'string' && tx.data.slice(0, 7) === competence
 
 export default async function handler(req, res) {

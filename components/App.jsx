@@ -74,7 +74,7 @@ function App() {
   const hydratedRef = useRef(false);
 
   useEffect(()=>{
-    if (!nfseRun?.id || !['queued','authenticating','awaiting_otp','validating_access','preparing_draft','preview_ready'].includes(nfseRun.status)) return;
+    if (!nfseRun?.id || !['queued','authenticating','awaiting_otp','validating_access','preparing_draft'].includes(nfseRun.status)) return;
     let alive = true;
     const poll = async () => {
       try {
@@ -1006,7 +1006,7 @@ const handleSubmit=async()=>{
               </div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
                 {notaModal==="pendentes" && cfg.lista.length>0 && (
-                  <button onClick={startNfseAutomation} disabled={nfseBusy || ['queued','authenticating','awaiting_otp','validating_access','preparing_draft','preview_ready'].includes(nfseRun?.status)}
+                  <button onClick={startNfseAutomation} disabled={nfseBusy || ['queued','authenticating','awaiting_otp','validating_access','preparing_draft'].includes(nfseRun?.status)}
                     style={{background:C.orange||"#E67E22",color:"white",border:"none",borderRadius:12,padding:"10px 14px",fontSize:12,fontWeight:700,fontFamily:"inherit",cursor:nfseBusy?"wait":"pointer",whiteSpace:"nowrap",opacity:nfseBusy?0.65:1}}>
                     {nfseBusy?"Aguarde…":"Emitir Nota"}
                   </button>
