@@ -128,11 +128,26 @@ try {
     timeout:60000,
   })
   await waitForHash(page, '/emissor/listagem')
-  const issueButton = page.getByRole('button', { name:/^emitir nova nota$/i })
-  if (await issueButton.count() !== 1 || !await issueButton.isVisible().catch(() => false)) {
-    throw new Error('INVOICE_LIST_EMIT_NEW_BUTTON_NOT_UNIQUE')
+  const issueButtonCandidates = page.getByRole('button', { name:/emitir nova nota/i })
+  // The SPA can keep duplicate responsive/hidden controls in the DOM. Count
+  // only controls that are actually visible and enabled before deciding.
+  const visibleIssueButtonIndexes = await issueButtonCandidates.evaluateAll(elements =>
+    elements.map((element, index) => {
+      const style = getComputedStyle(element)
+      const rect = element.getBoundingClientRect()
+      const visible = style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && Number(style.opacity || 1) > 0
+        && rect.width > 0
+        && rect.height > 0
+      const enabled = !element.disabled && element.getAttribute('aria-disabled') !== 'true'
+      return visible && enabled ? index : -1
+    }).filter(index => index >= 0)
+  )
+  if (visibleIssueButtonIndexes.length !== 1) {
+    throw new Error(`INVOICE_LIST_EMIT_NEW_BUTTON_NOT_UNIQUE_${visibleIssueButtonIndexes.length}`)
   }
-  await issueButton.click({ timeout:12000 })
+  await issueButtonCandidates.nth(visibleIssueButtonIndexes[0]).click({ timeout:12000 })
   await waitForHash(page, '/emissor/tomadores')
 
   // Search only by the exact document from the selected app transaction.
