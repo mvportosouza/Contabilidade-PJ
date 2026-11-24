@@ -78,8 +78,9 @@ function safeFieldNames(state) {
   ].filter(Boolean).map(x => x.slice(0,120)).slice(0,40)
 }
 function formattedTaxId(digits) {
-  if (digits.length === 14) return digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')
-  if (digits.length === 11) return digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4')
+  const value = String(digits || '').replace(/\D/g, '')
+  if (value.length === 14) return value.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')
+  if (value.length === 11) return value.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4')
   throw new Error('INVALID_CUSTOMER_TAX_ID_LENGTH')
 }
 async function closeKnownAccountPanel(page) {
@@ -87,8 +88,6 @@ async function closeKnownAccountPanel(page) {
   const count = await close.count().catch(() => 0)
   if (count !== 1 || !await close.isVisible().catch(() => false)) return { found:false, closed:false }
   try {
-    // Exact test id observed in the real Contabilizei run; force is limited to this
-    // non-destructive close control, never used on issuance or fiscal controls.
     await close.click({ timeout:5000, force:true })
     await page.waitForTimeout(400)
     return { found:true, closed:!(await close.isVisible().catch(() => false)) }
@@ -98,6 +97,64 @@ async function closeKnownAccountPanel(page) {
 }
 async function waitForHash(page, hashPart, timeout = 20000) {
   await page.waitForFunction(part => location.hash.includes(part), hashPart, { timeout })
+}
+async function findVisibleEmitNewControl(page) {
+  const selector = 'button,a,[role="button"],[role="link"],input[type="button"],input[type="submit"],[data-testid]'
+  const locator = page.locator(selector)
+  const candidates = await locator.evaluateAll(elements => {
+    const norm = value => String(value || '').replace(/\s+/g, ' ').trim()
+    const visible = element => {
+      const style = getComputedStyle(element)
+      const rect = element.getBoundingClientRect()
+      return style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && Number(style.opacity || 1) > 0
+        && rect.width > 0
+        && rect.height > 0
+    }
+    const matches = []
+    elements.forEach((element, index) => {
+      if (!visible(element)) return
+      const label = norm(element.innerText || element.value || element.getAttribute('aria-label') || element.getAttribute('title'))
+      if (!/emitir\s*nova\s*nota/i.test(label)) return
+      const enabled = !element.disabled && element.getAttribute('aria-disabled') !== 'true'
+      matches.push({
+        index,
+        tag:element.tagName.toLowerCase(),
+        role:element.getAttribute('role') || '',
+        label:label.slice(0,100),
+        testId:(element.getAttribute('data-testid') || '').slice(0,80),
+        href:(element.getAttribute('href') || '').slice(0,160),
+        enabled
+      })
+    })
+    // Prefer the smallest semantic clickable control; remove matching ancestor
+    // wrappers when a more specific matching clickable descendant exists.
+    return matches.filter(candidate => {
+      const el = elements[candidate.index]
+      return !matches.some(other => {
+        if (other.index === candidate.index) return false
+        const child = elements[other.index]
+        return el.contains(child) && child !== el
+      })
+    })
+  }).catch(() => [])
+  return { locator, candidates }
+}
+async function saveMenuDiagnostic(tx, page, phase = 'menu_diagnostic') {
+  const state = await inspectContabilizeiMenu(page)
+  const form = await inspectContabilizeiForm(page)
+  await setStatus('preview_ready', { result:{
+    phase,
+    issuance_enabled:false,
+    transaction_id:String(tx.id),
+    invoice_form_detected:form.invoiceFormDetected === true,
+    detected_fields:safeFieldNames(form),
+    menu_candidate_count:state.candidates.length,
+    menu_candidates:state.candidates,
+    page_title:form.title || state.title,
+    page_path:form.url || state.url,
+  }})
 }
 let browser
 try {
@@ -120,68 +177,69 @@ try {
 
   const accountPanel = await closeKnownAccountPanel(page)
 
-  // Notebook screenshots prove this authenticated SPA route:
-  // /painel-de-controle/#/emissor/listagem
-  // Navigate by the observed route instead of guessing a sidebar element.
+  // Exact SPA route observed in the notebook screenshots.
   await page.goto('https://app.contabilizei.com.br/painel-de-controle/#/emissor/listagem', {
     waitUntil:'domcontentloaded',
     timeout:60000,
   })
   await waitForHash(page, '/emissor/listagem')
-  const issueButtonCandidates = page.getByRole('button', { name:/emitir nova nota/i })
-  // The SPA can keep duplicate responsive/hidden controls in the DOM. Count
-  // only controls that are actually visible and enabled before deciding.
-  const visibleIssueButtonIndexes = await issueButtonCandidates.evaluateAll(elements =>
-    elements.map((element, index) => {
-      const style = getComputedStyle(element)
-      const rect = element.getBoundingClientRect()
-      const visible = style.display !== 'none'
-        && style.visibility !== 'hidden'
-        && Number(style.opacity || 1) > 0
-        && rect.width > 0
-        && rect.height > 0
-      const enabled = !element.disabled && element.getAttribute('aria-disabled') !== 'true'
-      return visible && enabled ? index : -1
-    }).filter(index => index >= 0)
-  )
-  if (visibleIssueButtonIndexes.length !== 1) {
-    throw new Error(`INVOICE_LIST_EMIT_NEW_BUTTON_NOT_UNIQUE_${visibleIssueButtonIndexes.length}`)
+
+  // The notebook screenshot shows this as a blue action, but the site may
+  // render it as an anchor or custom clickable element rather than <button>.
+  // Wait for the text, then search all visible interactive element types.
+  await page.getByText(/emitir\s*nova\s*nota/i).first().waitFor({ state:'visible', timeout:15000 }).catch(() => {})
+  await page.waitForTimeout(800)
+  const issueControl = await findVisibleEmitNewControl(page)
+
+  if (issueControl.candidates.length !== 1 || !issueControl.candidates[0].enabled) {
+    // Save the actual controls found on the list page instead of ending with
+    // an opaque auth failure. No click is attempted when the target is unclear.
+    await saveMenuDiagnostic(tx, page, 'menu_diagnostic')
+    console.log('[nfse.discovery] emit_new_control_candidates', JSON.stringify(issueControl.candidates))
+    process.exitCode = 0
+  } else {
+    await issueControl.locator.nth(issueControl.candidates[0].index).click({ timeout:12000 })
+    await waitForHash(page, '/emissor/tomadores')
+
+    const customerSearch = page.getByPlaceholder(/busque pelo nome, e-mail, CPF ou CNPJ/i)
+    if (await customerSearch.count() !== 1 || !await customerSearch.isVisible().catch(() => false)) {
+      throw new Error('CUSTOMER_SEARCH_NOT_UNIQUE')
+    }
+    await customerSearch.fill(draft.customer.taxId)
+    await page.waitForTimeout(1000)
+
+    const documentLabel = formattedTaxId(draft.customer.taxId)
+    const matchingDocument = page.getByText(documentLabel, { exact:true })
+    const matchCount = await matchingDocument.count().catch(() => 0)
+    if (matchCount !== 1 || !await matchingDocument.first().isVisible().catch(() => false)) {
+      throw new Error(`CUSTOMER_DOCUMENT_MATCH_NOT_UNIQUE_${matchCount}`)
+    }
+    await matchingDocument.first().click({ timeout:12000 })
+    await waitForHash(page, '/emissor/emitir')
+
+    const form = await inspectContabilizeiForm(page)
+    if (!form.invoiceFormDetected) {
+      await saveMenuDiagnostic(tx, page, 'menu_diagnostic')
+    } else {
+      const state = await inspectContabilizeiMenu(page)
+      await setStatus('preview_ready', { result:{
+        phase:'form_discovery',
+        issuance_enabled:false,
+        transaction_id:String(tx.id),
+        invoice_form_detected:true,
+        detected_fields:safeFieldNames(form),
+        menu_candidate_count:state.candidates.length,
+        menu_candidates:state.candidates,
+        page_title:form.title,
+        page_path:form.url,
+      }})
+      console.log('[nfse.discovery] form_discovery_ready', JSON.stringify({
+        account_panel_closed:accountPanel.closed,
+        route:'/emissor/emitir',
+        field_count:safeFieldNames(form).length
+      }))
+    }
   }
-  await issueButtonCandidates.nth(visibleIssueButtonIndexes[0]).click({ timeout:12000 })
-  await waitForHash(page, '/emissor/tomadores')
-
-  // Search only by the exact document from the selected app transaction.
-  const customerSearch = page.getByPlaceholder(/busque pelo nome, e-mail, CPF ou CNPJ/i)
-  if (await customerSearch.count() !== 1) throw new Error('CUSTOMER_SEARCH_NOT_UNIQUE')
-  await customerSearch.fill(draft.customer.taxId)
-  await page.waitForTimeout(900)
-
-  const documentLabel = formattedTaxId(draft.customer.taxId)
-  const matchingDocument = page.getByText(documentLabel, { exact:true })
-  const matchCount = await matchingDocument.count().catch(() => 0)
-  if (matchCount !== 1 || !await matchingDocument.first().isVisible().catch(() => false)) {
-    throw new Error(`CUSTOMER_DOCUMENT_MATCH_NOT_UNIQUE_${matchCount}`)
-  }
-  await matchingDocument.first().click({ timeout:12000 })
-  await waitForHash(page, '/emissor/emitir')
-
-  const form = await inspectContabilizeiForm(page)
-  const state = await inspectContabilizeiMenu(page)
-  if (!form.invoiceFormDetected) throw new Error('CONTABILIZEI_INVOICE_FORM_NOT_RECOGNIZED')
-
-  // Stop at the form. Do not fill, continue, review, save or issue.
-  await setStatus('preview_ready', { result:{
-    phase:'form_discovery',
-    issuance_enabled:false,
-    transaction_id:String(tx.id),
-    invoice_form_detected:true,
-    detected_fields:safeFieldNames(form),
-    menu_candidate_count:state.candidates.length,
-    menu_candidates:state.candidates,
-    page_title:form.title,
-    page_path:form.url,
-  }})
-  console.log('[nfse.discovery] form_discovery_ready', JSON.stringify({ account_panel_closed:accountPanel.closed, route:'/emissor/emitir', field_count:safeFieldNames(form).length }))
 } catch (error) {
   const code = String(error?.message || 'WORKER_FAILED').replace(/[^A-Z0-9_:-]/gi, '_').slice(0,80)
   try { await setStatus('failed', { errorCode:code }) } catch {}
