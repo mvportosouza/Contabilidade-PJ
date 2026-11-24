@@ -57,9 +57,21 @@ async function closeKnownAccountPanel(page) {
   const close = page.locator('[data-testid="box-conta-usuario-fechar"]')
   const count = await close.count().catch(() => 0)
   if (count !== 1) return { attempted:false, closed:false, reason:`exact_close_control_count_${count}` }
-  if (!await close.isVisible().catch(() => false)) return { attempted:false, closed:false, reason:'exact_close_control_not_visible' }
-  await close.click({ timeout:8000 })
-  await page.waitForTimeout(500)
+  const visible = await close.isVisible().catch(() => false)
+  if (!visible) return { attempted:false, closed:false, reason:'exact_close_control_not_visible' }
+  const enabled = await close.isEnabled().catch(() => false)
+  if (!enabled) return { attempted:false, closed:false, reason:'exact_close_control_disabled' }
+
+  await close.scrollIntoViewIfNeeded({ timeout:5000 }).catch(() => {})
+  await close.waitFor({ state:'visible', timeout:5000 }).catch(() => {})
+  try {
+    await close.click({ timeout:5000, trial:true })
+    await close.click({ timeout:5000 })
+  } catch (error) {
+    const message = String(error?.message || '')
+    return { attempted:true, closed:false, reason:message.includes('Timeout')?'exact_close_control_not_actionable':'exact_close_control_click_failed' }
+  }
+  await page.waitForTimeout(700)
   const stillVisible = await close.isVisible().catch(() => false)
   return { attempted:true, closed:!stillVisible, reason:stillVisible?'panel_still_visible':'closed_by_exact_testid' }
 }
@@ -80,8 +92,6 @@ try{
   await waitAuth(page)
   await setStatus('preparing_draft')
 
-  // The last real Supabase run identified this exact open account drawer and
-  // its unique close control. Close only that drawer, then inspect main navigation.
   const panelClose = await closeKnownAccountPanel(page)
   const state=await inspectContabilizeiMenu(page)
   const form=await inspectContabilizeiForm(page)
