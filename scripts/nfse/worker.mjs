@@ -61,12 +61,29 @@ async function waitAuth(page) {
   const deadline = Date.now() + 60000
   while (Date.now() < deadline) {
     const text = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ')
-    if (/código inválido|código expirado|código incorreto|não foi possível validar/i.test(text)) throw new Error('OTP_REJECTED')
+    // Reject only explicit OTP errors. Generic page text such as
+    // "não foi possível validar" is not sufficient evidence of OTP rejection.
+    if (/código inválido|código expirado|código incorreto|invalid code|expired code|incorrect code/i.test(text)) {
+      throw new Error('OTP_REJECTED')
+    }
     const otpVisible = await page.getByText(/insira o código de verificação/i).first().isVisible().catch(() => false)
     const passwordVisible = await page.getByLabel(/senha/i).first().isVisible().catch(() => false)
     const loginUrl = /\/login(?:\/|$)/i.test(new URL(page.url()).pathname)
     if (!otpVisible && !passwordVisible && !loginUrl) return
     await page.waitForTimeout(1200)
+  }
+
+  // Preserve evidence when the authentication outcome is ambiguous.
+  try {
+    await page.screenshot({ path:'nfse-auth-failure.png', fullPage:true, timeout:10000 })
+    console.error('[nfse.auth.diagnostic]', JSON.stringify({
+      url:page.url(),
+      title:await page.title().catch(() => ''),
+      otp_prompt_visible:await page.getByText(/insira o código de verificação/i).first().isVisible().catch(() => false),
+      password_field_visible:await page.getByLabel(/senha/i).first().isVisible().catch(() => false),
+    }))
+  } catch (captureError) {
+    console.error('[nfse.auth.diagnostic.capture_failed]', String(captureError?.message || captureError))
   }
   throw new Error('AUTH_OUTCOME_TIMEOUT')
 }
