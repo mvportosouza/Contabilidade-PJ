@@ -95,6 +95,28 @@ async function closeKnownAccountPanel(page) {
     return { found:true, closed:false }
   }
 }
+async function dismissKnownBillingNotice(page) {
+  const notice = page.getByText(/sua mensalidade está atrasada/i).first()
+  const present = await notice.isVisible().catch(() => false)
+  if (!present) return { present:false, dismissed:false, reason:'notice_not_visible' }
+
+  // Only dismiss the exact informational notice. Never click payment,
+  // regularization, subscription, or other account-management controls.
+  const acknowledge = page.getByRole('button', { name:/^entendi$/i })
+  const count = await acknowledge.count().catch(() => 0)
+  if (count !== 1 || !await acknowledge.isVisible().catch(() => false)
+      || !await acknowledge.isEnabled().catch(() => false)) {
+    return { present:true, dismissed:false, reason:'acknowledge_button_not_unique' }
+  }
+
+  try {
+    await acknowledge.click({ timeout:5000 })
+    await notice.waitFor({ state:'hidden', timeout:5000 })
+    return { present:true, dismissed:true, reason:'informational_notice_acknowledged' }
+  } catch {
+    return { present:true, dismissed:false, reason:'notice_did_not_close' }
+  }
+}
 async function waitForHash(page, hashPart, timeout = 20000) {
   await page.waitForFunction(part => location.hash.includes(part), hashPart, { timeout })
 }
@@ -141,11 +163,12 @@ async function findVisibleEmitNewControl(page) {
   }).catch(() => [])
   return { locator, candidates }
 }
-async function saveMenuDiagnostic(tx, page, phase = 'menu_diagnostic') {
+async function saveMenuDiagnostic(tx, page, phase = 'menu_diagnostic', extra = {}) {
   const state = await inspectContabilizeiMenu(page)
   const form = await inspectContabilizeiForm(page)
   await setStatus('preview_ready', { result:{
     phase,
+    ...extra,
     issuance_enabled:false,
     transaction_id:String(tx.id),
     invoice_form_detected:form.invoiceFormDetected === true,
@@ -216,14 +239,28 @@ try {
     }
     await matchingDocument.first().click({ timeout:12000 })
     await waitForHash(page, '/emissor/emitir')
+    await page.waitForLoadState('domcontentloaded', { timeout:8000 }).catch(() => {})
+    await page.waitForTimeout(700)
 
+    // The account notice can appear after customer selection. Handle only
+    // its exact acknowledgement button, then re-check the invoice form.
+    const billingNotice = await dismissKnownBillingNotice(page)
+    if (page.url().includes('/emissor/') && !page.url().includes('#/emissor/emitir')) {
+      throw new Error('INVOICE_ROUTE_CHANGED_AFTER_ACCOUNT_NOTICE')
+    }
+    await page.waitForTimeout(500)
     const form = await inspectContabilizeiForm(page)
     if (!form.invoiceFormDetected) {
-      await saveMenuDiagnostic(tx, page, 'menu_diagnostic')
+      await saveMenuDiagnostic(tx, page, 'form_not_detected_after_customer_selection', {
+        billing_notice:billingNotice,
+        expected_route:'/emissor/emitir',
+        actual_url:page.url(),
+      })
     } else {
       const state = await inspectContabilizeiMenu(page)
       await setStatus('preview_ready', { result:{
         phase:'form_discovery',
+        billing_notice:billingNotice,
         issuance_enabled:false,
         transaction_id:String(tx.id),
         invoice_form_detected:true,
