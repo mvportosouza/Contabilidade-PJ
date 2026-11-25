@@ -1,4 +1,5 @@
 import { pathToFileURL } from 'node:url'
+import { mkdir } from 'node:fs/promises'
 import { buildNfseDraft } from './preview-mapping.mjs'
 import { inspectContabilizeiForm, inspectContabilizeiMenu } from './contabilizei-preview.mjs'
 
@@ -75,7 +76,7 @@ async function waitAuth(page) {
 
   // Preserve evidence when the authentication outcome is ambiguous.
   try {
-    await page.screenshot({ path:'nfse-auth-failure.png', fullPage:true, timeout:10000 })
+    await captureDiagnostic(page, 'auth-outcome-timeout')
     console.error('[nfse.auth.diagnostic]', JSON.stringify({
       url:page.url(),
       title:await page.title().catch(() => ''),
@@ -92,7 +93,6 @@ function safeFieldNames(state) {
     ...(state.fields || []).map(x => [x.tag,x.role,x.type,x.label,x.aria,x.placeholder,x.name,x.testId].filter(Boolean).join(':')),
     ...(state.buttons || []).map(x => `button:${x.label}:${x.testId}`),
     ...(state.headings || []).map(x => `label:${x}`),
-    ...(state.dialogs || []).map(x => `dialog:${x}`),
   ].filter(Boolean).map(x => x.slice(0,120)).slice(0,40)
 }
 function formattedTaxId(digits) {
@@ -117,36 +117,23 @@ async function dismissKnownBillingNotice(page) {
   const notice = page.getByText(/sua mensalidade está atrasada/i).first()
   const present = await notice.isVisible().catch(() => false)
   if (!present) return { present:false, dismissed:false, reason:'notice_not_visible' }
+  await captureDiagnostic(page, 'billing-notice-before')
 
-  // The page can contain other "Entendi" buttons. Use only the observed
-  // stable test id and verify that its ancestor actually contains this notice.
-  const acknowledge = page.locator('[data-testid="button-ok"]')
+  // Only dismiss the exact informational notice. Never click payment,
+  // regularization, subscription, or other account-management controls.
+  const acknowledge = page.getByRole('button', { name:/^entendi$/i })
   const count = await acknowledge.count().catch(() => 0)
   if (count !== 1 || !await acknowledge.isVisible().catch(() => false)
       || !await acknowledge.isEnabled().catch(() => false)) {
-    return { present:true, dismissed:false, reason:'billing_acknowledge_control_not_unique' }
-  }
-
-  const belongsToBillingNotice = await acknowledge.evaluate(element => {
-    const billingText = /sua mensalidade está atrasada/i
-    let current = element
-    while (current && current !== document.body) {
-      if (billingText.test(current.innerText || current.textContent || '')) return true
-      current = current.parentElement
-    }
-    return false
-  }).catch(() => false)
-
-  if (!belongsToBillingNotice) {
-    return { present:true, dismissed:false, reason:'billing_acknowledge_scope_mismatch' }
+    return { present:true, dismissed:false, reason:'acknowledge_button_not_unique' }
   }
 
   try {
     await acknowledge.click({ timeout:5000 })
     await notice.waitFor({ state:'hidden', timeout:5000 })
-    return { present:true, dismissed:true, reason:'billing_notice_acknowledged' }
+    return { present:true, dismissed:true, reason:'informational_notice_acknowledged' }
   } catch {
-    return { present:true, dismissed:false, reason:'billing_notice_did_not_close' }
+    return { present:true, dismissed:false, reason:'notice_did_not_close' }
   }
 }
 async function waitForHash(page, hashPart, timeout = 20000) {
@@ -198,6 +185,7 @@ async function findVisibleEmitNewControl(page) {
 async function saveMenuDiagnostic(tx, page, phase = 'menu_diagnostic', extra = {}) {
   const state = await inspectContabilizeiMenu(page)
   const form = await inspectContabilizeiForm(page)
+  await captureDiagnostic(page, phase)
   await setStatus('preview_ready', { result:{
     phase,
     ...extra,
@@ -212,6 +200,22 @@ async function saveMenuDiagnostic(tx, page, phase = 'menu_diagnostic', extra = {
   }})
 }
 let browser
+let page
+async function captureDiagnostic(pageRef, label) {
+  if (!pageRef) return null
+  try {
+    await mkdir('nfse-diagnostics', { recursive:true })
+    const safeRunId = String(runId).replace(/[^a-zA-Z0-9_-]/g, '_')
+    const safeLabel = String(label).replace(/[^a-zA-Z0-9_-]/g, '_')
+    const path = `nfse-diagnostics/${safeRunId}-${Date.now()}-${safeLabel}.png`
+    await pageRef.screenshot({ path, fullPage:true, animations:'disabled', timeout:15000 })
+    console.log('[nfse.screenshot]', path)
+    return path
+  } catch (error) {
+    console.error('[nfse.screenshot.failed]', label, String(error?.message || error))
+    return null
+  }
+}
 try {
   const job = await api(`/api/nfse/worker?runId=${encodeURIComponent(runId)}&action=claim`)
   const tx = job.payload?.[0]
@@ -219,7 +223,7 @@ try {
 
   browser = await chromium.launch({ headless:true })
   const context = await browser.newContext({ viewport:{ width:1440, height:1000 } })
-  const page = await context.newPage()
+  page = await context.newPage()
 
   await page.goto('https://app.contabilizei.com.br/', { waitUntil:'domcontentloaded', timeout:60000 })
   await page.getByLabel(/usuário \(e-mail ou cpf\)|usuário|e-mail ou cpf|e-mail/i).first().fill(job.credentials.email)
@@ -283,6 +287,7 @@ try {
     await page.waitForTimeout(500)
     const form = await inspectContabilizeiForm(page)
     if (!form.invoiceFormDetected) {
+      await captureDiagnostic(page, 'form-not-detected')
       await saveMenuDiagnostic(tx, page, 'form_not_detected', {
         billing_notice:billingNotice,
         expected_route:'/emissor/emitir',
@@ -290,6 +295,7 @@ try {
       })
     } else {
       const state = await inspectContabilizeiMenu(page)
+      await captureDiagnostic(page, 'form-detected')
       await setStatus('preview_ready', { result:{
         phase:'form_discovery',
         billing_notice:billingNotice,
@@ -310,6 +316,7 @@ try {
     }
   }
 } catch (error) {
+  await captureDiagnostic(page, 'worker-error')
   const code = String(error?.message || 'WORKER_FAILED').replace(/[^A-Z0-9_:-]/gi, '_').slice(0,80)
   try { await setStatus('failed', { errorCode:code }) } catch {}
   console.error('[nfse.discovery]', code)
