@@ -71,15 +71,34 @@ export async function inspectContabilizeiForm(page) {
     .map(el => (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 90))
     .filter(Boolean).slice(0, 45))
 
+  // Capture only structural dialog information (headings and button labels),
+  // never free-form input values or complete dialog text.
+  const dialogs = await page.locator('[role="dialog"],[aria-modal="true"]').evaluateAll(items => items.map(el => {
+    const visible = node => {
+      const style = getComputedStyle(node), rect = node.getBoundingClientRect()
+      return style.display !== 'none' && style.visibility !== 'hidden'
+        && Number(style.opacity || 1) > 0 && rect.width > 0 && rect.height > 0
+    }
+    if (!visible(el)) return null
+    const heading = [...el.querySelectorAll('h1,h2,h3,[role="heading"]')]
+      .filter(visible).map(node => (node.innerText || node.textContent || '').replace(/\\s+/g, ' ').trim()).filter(Boolean)[0] || ''
+    const buttons = [...el.querySelectorAll('button,[role="button"]')]
+      .filter(visible).map(node => (node.innerText || node.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim()).filter(Boolean).slice(0, 6)
+    return [heading, ...buttons].filter(Boolean).join(' | ').slice(0, 180)
+  }).filter(Boolean).slice(0, 8)).catch(() => [])
+
   const searchable = [
     ...fields.map(x => `${x.label} ${x.aria} ${x.placeholder} ${x.name} ${x.testId}`),
     ...buttons.map(x => x.label),
     ...headings,
+    ...dialogs,
   ].join(' | ')
 
-  const invoiceFormDetected = /atividade da empresa|CNAE/i.test(searchable)
-    && /serviço prestado|código nacional/i.test(searchable)
-    && /descrição do serviço/i.test(searchable)
+  const normalized = searchable.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase()
+  const hasActivity = /atividade da empresa|\\bcnae\\b|atividade economica/.test(normalized)
+  const hasService = /servico prestado|codigo nacional|item da lista de servicos/.test(normalized)
+  const hasDescription = /descricao do servico|discriminacao do servico/.test(normalized)
+  const invoiceFormDetected = hasActivity && hasService && hasDescription
 
-  return { title, url, invoiceFormDetected, fields, buttons, headings }
+  return { title, url, invoiceFormDetected, fields, buttons, headings, dialogs, signals:{ hasActivity, hasService, hasDescription } }
 }

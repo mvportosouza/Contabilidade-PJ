@@ -92,6 +92,7 @@ function safeFieldNames(state) {
     ...(state.fields || []).map(x => [x.tag,x.role,x.type,x.label,x.aria,x.placeholder,x.name,x.testId].filter(Boolean).join(':')),
     ...(state.buttons || []).map(x => `button:${x.label}:${x.testId}`),
     ...(state.headings || []).map(x => `label:${x}`),
+    ...(state.dialogs || []).map(x => `dialog:${x}`),
   ].filter(Boolean).map(x => x.slice(0,120)).slice(0,40)
 }
 function formattedTaxId(digits) {
@@ -117,21 +118,35 @@ async function dismissKnownBillingNotice(page) {
   const present = await notice.isVisible().catch(() => false)
   if (!present) return { present:false, dismissed:false, reason:'notice_not_visible' }
 
-  // Only dismiss the exact informational notice. Never click payment,
-  // regularization, subscription, or other account-management controls.
-  const acknowledge = page.getByRole('button', { name:/^entendi$/i })
+  // The page can contain other "Entendi" buttons. Use only the observed
+  // stable test id and verify that its ancestor actually contains this notice.
+  const acknowledge = page.locator('[data-testid="button-ok"]')
   const count = await acknowledge.count().catch(() => 0)
   if (count !== 1 || !await acknowledge.isVisible().catch(() => false)
       || !await acknowledge.isEnabled().catch(() => false)) {
-    return { present:true, dismissed:false, reason:'acknowledge_button_not_unique' }
+    return { present:true, dismissed:false, reason:'billing_acknowledge_control_not_unique' }
+  }
+
+  const belongsToBillingNotice = await acknowledge.evaluate(element => {
+    const billingText = /sua mensalidade está atrasada/i
+    let current = element
+    while (current && current !== document.body) {
+      if (billingText.test(current.innerText || current.textContent || '')) return true
+      current = current.parentElement
+    }
+    return false
+  }).catch(() => false)
+
+  if (!belongsToBillingNotice) {
+    return { present:true, dismissed:false, reason:'billing_acknowledge_scope_mismatch' }
   }
 
   try {
     await acknowledge.click({ timeout:5000 })
     await notice.waitFor({ state:'hidden', timeout:5000 })
-    return { present:true, dismissed:true, reason:'informational_notice_acknowledged' }
+    return { present:true, dismissed:true, reason:'billing_notice_acknowledged' }
   } catch {
-    return { present:true, dismissed:false, reason:'notice_did_not_close' }
+    return { present:true, dismissed:false, reason:'billing_notice_did_not_close' }
   }
 }
 async function waitForHash(page, hashPart, timeout = 20000) {
