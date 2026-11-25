@@ -47,11 +47,11 @@ jobs:
           NFSE_RUN_ID: ${{ inputs.run_id }}
         run: node scripts/nfse/worker.mjs
 
-      - name: Upload authentication failure screenshot
+      - name: Upload Contabilizei screenshots and diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: nfse-auth-diagnostics-${{ inputs.run_id }}
-          path: nfse-auth-failure.png
+          path: nfse-diagnostics/*.png
           if-no-files-found: warn
           retention-days: 3
