@@ -139,6 +139,43 @@ async function dismissKnownBillingNotice(page) {
 async function waitForHash(page, hashPart, timeout = 20000) {
   await page.waitForFunction(part => location.hash.includes(part), hashPart, { timeout })
 }
+async function waitForAppReady(page, label, timeout = 60000) {
+  // SPA route changes can complete before the destination screen is rendered.
+  await page.waitForLoadState('domcontentloaded', { timeout }).catch(() => {})
+  // networkidle is useful but not sufficient by itself for a React SPA.
+  await page.waitForLoadState('networkidle', { timeout:Math.min(timeout, 20000) }).catch(() => {})
+  await page.waitForFunction(() => {
+    const root = document.querySelector('#root, #app, [data-reactroot]') || document.body
+    if (!root || !root.innerText?.trim()) return false
+    const pending = document.querySelectorAll(
+      '[class*="skeleton" i], [class*="loading" i], [aria-busy="true"], [role="progressbar"]'
+    )
+    return ![...pending].some(el => {
+      const style = getComputedStyle(el)
+      const rect = el.getBoundingClientRect()
+      return style.display !== 'none' && style.visibility !== 'hidden'
+        && Number(style.opacity || 1) > 0 && rect.width > 0 && rect.height > 0
+    })
+  }, { timeout }).catch(async () => {
+    await captureDiagnostic(page, `${label}-still-loading`)
+    throw new Error(`APP_DID_NOT_FINISH_LOADING_${label.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`)
+  })
+  await page.waitForTimeout(800)
+}
+async function clickUniqueVisibleText(page, pattern, label) {
+  const matches = page.getByText(pattern)
+  await matches.first().waitFor({ state:'visible', timeout:30000 })
+  const visible = []
+  for (let i = 0, count = await matches.count(); i < count; i++) {
+    const candidate = matches.nth(i)
+    if (await candidate.isVisible().catch(() => false)) visible.push(candidate)
+  }
+  if (visible.length !== 1) {
+    await captureDiagnostic(page, `${label}-ambiguous`)
+    throw new Error(`${label.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_NOT_UNIQUE_${visible.length}`)
+  }
+  await visible[0].click({ timeout:15000 })
+}
 async function findVisibleEmitNewControl(page) {
   const selector = 'button,a,[role="button"],[role="link"],input[type="button"],input[type="submit"],[data-testid]'
   const locator = page.locator(selector)
@@ -236,17 +273,19 @@ try {
 
   const accountPanel = await closeKnownAccountPanel(page)
 
-  // Exact SPA route observed in the notebook screenshots.
-  await page.goto('https://app.contabilizei.com.br/painel-de-controle/#/emissor/listagem', {
-    waitUntil:'domcontentloaded',
-    timeout:60000,
-  })
-  await waitForHash(page, '/emissor/listagem')
+  // Navigate through the real Contabilizei sidebar, as requested:
+  // Home > Minhas Rotinas > Emitir NFs-e. Do not deep-link to an internal route.
+  await waitForAppReady(page, 'home-after-login')
+  await captureDiagnostic(page, 'home-before-navigation')
+  await clickUniqueVisibleText(page, /^Minhas Rotinas$/i, 'minhas-rotinas')
+  await waitForAppReady(page, 'minhas-rotinas')
+  await captureDiagnostic(page, 'minhas-rotinas-open')
+  await clickUniqueVisibleText(page, /^Emitir NFs-e$/i, 'emitir-nfse')
+  await waitForAppReady(page, 'emitir-nfse')
+  await captureDiagnostic(page, 'emitir-nfse-destination')
 
-  // The notebook screenshot shows this as a blue action, but the site may
-  // render it as an anchor or custom clickable element rather than <button>.
-  // Wait for the text, then search all visible interactive element types.
-  await page.getByText(/emitir\s*nova\s*nota/i).first().waitFor({ state:'visible', timeout:15000 }).catch(() => {})
+  // Only inspect the destination after its loading indicators have cleared.
+  await page.getByText(/emitir\s*nova\s*nota/i).first().waitFor({ state:'visible', timeout:30000 }).catch(() => {})
   await page.waitForTimeout(800)
   const issueControl = await findVisibleEmitNewControl(page)
 
