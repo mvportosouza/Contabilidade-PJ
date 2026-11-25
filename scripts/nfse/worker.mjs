@@ -162,20 +162,99 @@ async function waitForAppReady(page, label, timeout = 60000) {
   })
   await page.waitForTimeout(800)
 }
-async function clickUniqueVisibleText(page, pattern, label) {
-  const matches = page.getByText(pattern)
-  await matches.first().waitFor({ state:'visible', timeout:30000 })
-  const visible = []
-  for (let i = 0, count = await matches.count(); i < count; i++) {
-    const candidate = matches.nth(i)
-    if (await candidate.isVisible().catch(() => false)) visible.push(candidate)
-  }
-  if (visible.length !== 1) {
-    await captureDiagnostic(page, `${label}-ambiguous`)
-    throw new Error(`${label.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_NOT_UNIQUE_${visible.length}`)
-  }
-  await visible[0].click({ timeout:15000 })
+async function findSidebarText(page, pattern, label) {
+  // Sidebar entries can be rendered as nested spans/divs rather than semantic
+  // buttons. Inspect visible text nodes and their clickable ancestors.
+  const matches = await page.locator('body').evaluate((_, source) => {
+    const re = new RegExp(source, 'i')
+    const visible = el => {
+      const s = getComputedStyle(el), r = el.getBoundingClientRect()
+      return s.display !== 'none' && s.visibility !== 'hidden'
+        && Number(s.opacity || 1) > 0 && r.width > 0 && r.height > 0
+    }
+    const norm = value => String(value || '').replace(/\s+/g, ' ').trim()
+    const found = []
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT)
+    let node
+    while ((node = walker.nextNode())) {
+      if (!visible(node)) continue
+      const text = norm(node.innerText || node.textContent)
+      if (!text || !re.test(text)) continue
+      // Keep the smallest visible element whose own rendered text matches.
+      const childMatch = [...node.children].some(child =>
+        visible(child) && re.test(norm(child.innerText || child.textContent))
+      )
+      if (childMatch) continue
+      let clickable = node, depth = 0
+      while (clickable && depth < 6) {
+        const role = clickable.getAttribute('role') || ''
+        const style = getComputedStyle(clickable)
+        if (/^(a|button)$/i.test(clickable.tagName)
+          || /button|menuitem|link/.test(role)
+          || clickable.hasAttribute('data-testid')
+          || style.cursor === 'pointer') break
+        clickable = clickable.parentElement
+        depth++
+      }
+      found.push({
+        text:text.slice(0,100),
+        tag:node.tagName.toLowerCase(),
+        clickableTag:clickable?.tagName.toLowerCase() || '',
+        role:clickable?.getAttribute('role') || '',
+        testId:clickable?.getAttribute('data-testid') || '',
+        aria:clickable?.getAttribute('aria-label') || '',
+        title:clickable?.getAttribute('title') || '',
+        clickable:!!clickable && depth < 6
+      })
+      if (found.length >= 40) break
+    }
+    return found
+  }, pattern.source).catch(() => [])
+  console.log('[nfse.sidebar.inspect]', JSON.stringify({label,matches}))
+  return matches
 }
+async function clickSidebarEntry(page, pattern, label) {
+  const matches = await findSidebarText(page, pattern, label)
+  const clickable = matches.filter(item => item.clickable)
+  if (clickable.length !== 1) {
+    await captureDiagnostic(page, label + '-sidebar-elements')
+    throw new Error('SIDEBAR_' + label.toUpperCase().replace(/[^A-Z0-9]+/g,'_')
+      + '_CLICK_TARGETS_' + clickable.length)
+  }
+  const item = clickable[0]
+  let locator
+  if (item.testId) locator = page.locator('[data-testid=' + JSON.stringify(item.testId) + ']')
+  else if (item.aria) locator = page.locator('[aria-label=' + JSON.stringify(item.aria) + ']')
+  else if (item.title) locator = page.locator('[title=' + JSON.stringify(item.title) + ']')
+  else {
+    // Text can live inside a nested span; click its closest identified ancestor.
+    locator = page.getByText(pattern).filter({visible:true}).first()
+    await locator.evaluate(el => {
+      let target = el
+      for (let depth=0; depth<6 && target; depth++, target=target.parentElement) {
+        const role=target.getAttribute('role') || ''
+        const style=getComputedStyle(target)
+        if (/^(a|button)$/i.test(target.tagName) || /button|menuitem|link/.test(role)
+          || target.hasAttribute('data-testid') || style.cursor==='pointer') {
+          target.click()
+          return
+        }
+      }
+      el.click()
+    })
+    await captureDiagnostic(page, label + '-after-click')
+    return
+  }
+  const count = await locator.count()
+  if (count !== 1) {
+    await captureDiagnostic(page, label + '-sidebar-ambiguous')
+    throw new Error('SIDEBAR_' + label.toUpperCase().replace(/[^A-Z0-9]+/g,'_')
+      + '_LOCATOR_COUNT_' + count)
+  }
+  await locator.click({timeout:10000, force:true})
+  await captureDiagnostic(page, label + '-after-click')
+}
+
 async function findVisibleEmitNewControl(page) {
   const selector = 'button,a,[role="button"],[role="link"],input[type="button"],input[type="submit"],[data-testid]'
   const locator = page.locator(selector)
@@ -277,10 +356,20 @@ try {
   // Home > Minhas Rotinas > Emitir NFs-e. Do not deep-link to an internal route.
   await waitForAppReady(page, 'home-after-login')
   await captureDiagnostic(page, 'home-before-navigation')
-  await clickUniqueVisibleText(page, /^Minhas Rotinas$/i, 'minhas-rotinas')
-  await waitForAppReady(page, 'minhas-rotinas')
-  await captureDiagnostic(page, 'minhas-rotinas-open')
-  await clickUniqueVisibleText(page, /^Emitir NFs-e$/i, 'emitir-nfse')
+  // Minhas Rotinas expands the left sidebar in-place; it does NOT navigate
+  // or render a new page. Do not wait for page/network readiness here.
+  await clickSidebarEntry(page, /Minhas\\s+Rotinas/i, 'minhas-rotinas')
+  const nfseMenuEntry = page.getByText(/Emitir\\s+NFs.?e/i).first()
+  await nfseMenuEntry.waitFor({state:'visible', timeout:12000}).catch(async () => {
+    await captureDiagnostic(page, 'minhas-rotinas-submenu-not-visible')
+    const menu = await findSidebarText(page, /Emitir\\s+NFs.?e/i, 'submenu-check')
+    console.log('[nfse.sidebar.submenu]', JSON.stringify(menu))
+    throw new Error('EMITIR_NFSE_SUBMENU_NOT_VISIBLE')
+  })
+  await captureDiagnostic(page, 'minhas-rotinas-submenu-open')
+  // Emitir NFs-e is the actual navigation action. Only after this click should
+  // we wait for the SPA destination to finish rendering.
+  await clickSidebarEntry(page, /Emitir\\s+NFs.?e/i, 'emitir-nfse')
   await waitForAppReady(page, 'emitir-nfse')
   await captureDiagnostic(page, 'emitir-nfse-destination')
 
