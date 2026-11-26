@@ -1,22 +1,34 @@
-CONTABILIDADE-PJ — ARQUIVOS PENDENTES DE SINCRONIZAÇÃO COM O GITHUB
+CONTABILIDADE-PJ — ESTADO DA INFRAESTRUTURA APÓS REMOÇÃO DA AUTOMAÇÃO NFS-e
 
-O QUE CONTÉM ESTE PACOTE
-1. docs/SUPABASE_MIGRATION_LEDGER.md
-   Atualiza o ledger para as 18 migrations encontradas em produção e registra a remoção da automação NFS-e, preservando as entradas históricas. Diferencia informações atuais verificadas das propriedades detalhadas que vieram do snapshot de 2026-09-01.
+A automação experimental de emissão assistida de NFS-e pela Contabilizei foi descontinuada. Não reinstale nem reative seus componentes.
 
-2. supabase/migrations/20261126103509_remove_nfse_automation_artifacts.sql
-   Cópia da migration de limpeza já aplicada em produção. Este arquivo é necessário para rastreabilidade no GitHub. NÃO reaplicar no Supabase: a migration 20261126103509 já foi executada e consta no histórico de produção.
+GITHUB
 
-AÇÃO NO GITHUB
-Envie/substitua os arquivos preservando exatamente os caminhos acima. Não faça upload para a raiz com os nomes simples.
+* Os endpoints pages/api/nfse, o worker scripts/nfse, a biblioteca lib/nfseServer.js, o workflow .github/workflows/nfse-assistida.yml e a documentação específica da automação foram removidos da branch main.
+* Permanecem workflows genéricos de CI, testes E2E, reparo de dependências e governança de migrations. Devem ser preservados.
+* A migration 20261126103509_remove_nfse_automation_artifacts.sql registra uma limpeza já aplicada em produção. NÃO reaplicar no Supabase.
+* As entradas históricas antigas de NFS-e permanecem no histórico de migrations por rastreabilidade; não são código ativo.
 
-VERCEL — VARIÁVEIS
-O código do frontend usa apenas NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY para inicializar o cliente Supabase.
-A Edge Function supabase/functions/delete-account/index.ts lê SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY do ambiente da própria Edge Function no Supabase. A service role key não deve ser armazenada no Vercel nem no frontend.
-As variáveis POSTGRES_* estão vinculadas a uma configuração de integração (configurationId presente na Vercel). O endpoint de listagem de integrações retornou 403 nesta auditoria; por segurança, não excluir essas variáveis enquanto o recurso provisionado não for identificado.
-Também não exclua SUPABASE_ANON_KEY, SUPABASE_PUBLISHABLE_KEY, SUPABASE_SECRET_KEY ou SUPABASE_JWT_SECRET sem confirmar o recurso que as provisionou e os consumidores externos. O código versionado pesquisado não mostrou uso server-side dessas variáveis.
+SUPABASE
 
-ESTADO VERIFICADO
-- Supabase: nfse_automation_runs e consume_nfse_otp ausentes; 18 entradas de migration preservadas; app_state e profiles preservadas; delete-account ativa.
-- Vercel: deploy de produção mais recente READY; nenhum erro de runtime identificado nas últimas 24 horas.
-- Não foi possível modificar GitHub diretamente porque a API do conector respondeu 403 Resource not accessible by integration.
+* public.nfse_automation_runs: ausente.
+* public.consume_nfse_otp(uuid): ausente.
+* Histórico de migrations: 18 registros.
+* public.app_state e public.profiles: preservadas.
+* Edge Function delete-account: ativa, versão 9, independente da automação.
+* Nenhum branch de desenvolvimento listado.
+
+VERCEL
+
+* Deploy de produção: READY.
+* Nenhum erro de runtime nas últimas 24 horas.
+* Nenhuma variável identificada pelo nome como específica da automação NFS-e/Contabilizei/OTP.
+* Não remover variáveis provisionadas por integração sem identificar sua origem e validar dependências.
+* Não remover os segredos do ambiente da Edge Function no Supabase.
+
+PRESERVAÇÃO
+
+* Não apagar migrations históricas aplicadas.
+* Não alterar dados financeiros, fiscais, app_state, profiles ou Auth.
+* Não remover workflows gerais ou integrações sem confirmar seu uso.
+* Não versionar senhas, tokens, chaves ou códigos OTP.
