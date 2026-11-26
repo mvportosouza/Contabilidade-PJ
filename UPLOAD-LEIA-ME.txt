@@ -1,38 +1,22 @@
-CONTABILIDADE-PJ — ORIENTAÇÕES DE UPLOAD E ESTADO DA INFRAESTRUTURA
+CONTABILIDADE-PJ — ARQUIVOS PENDENTES DE SINCRONIZAÇÃO COM O GITHUB
 
-ESTADO ATUAL
-A automação assistida de emissão de NFS-e pela Contabilizei foi descontinuada e removida do código operacional do aplicativo.
+O QUE CONTÉM ESTE PACOTE
+1. docs/SUPABASE_MIGRATION_LEDGER.md
+   Atualiza o ledger para as 18 migrations encontradas em produção e registra a remoção da automação NFS-e, preservando as entradas históricas. Diferencia informações atuais verificadas das propriedades detalhadas que vieram do snapshot de 2026-09-01.
 
-REPOSITÓRIO
-- O frontend atual não contém o fluxo de emissão assistida, botão de disparo, polling ou integração OTP.
-- Os endpoints pages/api/nfse, o worker scripts/nfse, a biblioteca lib/nfseServer.js, o workflow nfse-assistida e a documentação específica da automação foram removidos.
-- Permanecem apenas os workflows gerais de CI, testes E2E, reparo de dependências e governança de migrations. Eles não fazem parte da automação NFS-e.
+2. supabase/migrations/20261126103509_remove_nfse_automation_artifacts.sql
+   Cópia da migration de limpeza já aplicada em produção. Este arquivo é necessário para rastreabilidade no GitHub. NÃO reaplicar no Supabase: a migration 20261126103509 já foi executada e consta no histórico de produção.
 
-SUPABASE
-- A tabela public.nfse_automation_runs foi removida do banco de produção.
-- A função public.consume_nfse_otp(uuid) foi removida.
-- As entradas antigas permanecem no histórico de migrations como registro de mudanças aplicadas. Não apagar nem reescrever esse histórico.
-- A função Edge delete-account permanece ativa e independente da automação. Não removê-la.
+AÇÃO NO GITHUB
+Envie/substitua os arquivos preservando exatamente os caminhos acima. Não faça upload para a raiz com os nomes simples.
 
-VERCEL
-- As variáveis de ambiente específicas da automação NFS-e devem permanecer removidas.
-- Não remover SUPABASE_SERVICE_ROLE_KEY: ela é necessária à Edge Function delete-account.
-- Não remover variáveis de integração ou PostgreSQL sem confirmar que não são utilizadas por outro componente.
+VERCEL — VARIÁVEIS
+O código do frontend usa apenas NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY para inicializar o cliente Supabase.
+A Edge Function supabase/functions/delete-account/index.ts lê SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY do ambiente da própria Edge Function no Supabase. A service role key não deve ser armazenada no Vercel nem no frontend.
+As variáveis POSTGRES_* estão vinculadas a uma configuração de integração (configurationId presente na Vercel). O endpoint de listagem de integrações retornou 403 nesta auditoria; por segurança, não excluir essas variáveis enquanto o recurso provisionado não for identificado.
+Também não exclua SUPABASE_ANON_KEY, SUPABASE_PUBLISHABLE_KEY, SUPABASE_SECRET_KEY ou SUPABASE_JWT_SECRET sem confirmar o recurso que as provisionou e os consumidores externos. O código versionado pesquisado não mostrou uso server-side dessas variáveis.
 
-UPLOADS E ALTERAÇÕES
-- Envie apenas os arquivos explicitamente indicados em cada solicitação de manutenção.
-- Preserve os caminhos relativos do projeto.
-- Não substitua arquivos de produção por versões antigas do ZIP.
-- Não inclua chaves, tokens, senhas ou outros segredos em arquivos versionados ou em mensagens.
-
-PRESERVAÇÃO DE DADOS
-- Não alterar public.app_state, public.profiles, lançamentos fiscais, dados financeiros ou dados de autenticação como parte de limpeza documental.
-- Não apagar migrations históricas já aplicadas.
-- Toda futura alteração estrutural no banco deve ser registrada em uma nova migration e validada antes da aplicação em produção.
-
-VALIDAÇÃO
-Depois de qualquer upload de código:
-1. conferir o diff e os arquivos alterados;
-2. executar lint, testes unitários e build;
-3. verificar o deploy de produção na Vercel;
-4. conferir os logs e o funcionamento do fluxo afetado.
+ESTADO VERIFICADO
+- Supabase: nfse_automation_runs e consume_nfse_otp ausentes; 18 entradas de migration preservadas; app_state e profiles preservadas; delete-account ativa.
+- Vercel: deploy de produção mais recente READY; nenhum erro de runtime identificado nas últimas 24 horas.
+- Não foi possível modificar GitHub diretamente porque a API do conector respondeu 403 Resource not accessible by integration.
