@@ -65,33 +65,9 @@ function App() {
   const importFileRef = useRef(null);
   const [hideVal,setHideVal]=useState(false);
   const [toast,setToast]=useState(null);
-  const [nfseRun,setNfseRun]=useState(null);
-  const [nfseOtp,setNfseOtp]=useState("");
-  const [nfseBusy,setNfseBusy]=useState(false);
-  const [nfseError,setNfseError]=useState("");
 
   const [form,setForm]=useState(()=>createBlankForm(now));
   const hydratedRef = useRef(false);
-
-  useEffect(()=>{
-    if (!nfseRun?.id || !['queued','authenticating','awaiting_otp','validating_access','preparing_draft'].includes(nfseRun.status)) return;
-    let alive = true;
-    const poll = async () => {
-      try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const token = sessionData?.session?.access_token;
-        if (!token) return;
-        const response = await fetch(`/api/nfse/status?runId=${encodeURIComponent(nfseRun.id)}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const body = await response.json();
-        if (alive && response.ok && body.run) setNfseRun(body.run);
-      } catch { /* a próxima consulta tentará novamente */ }
-    };
-    const timer = setInterval(poll, 2500);
-    poll();
-    return () => { alive = false; clearInterval(timer); };
-  }, [nfseRun?.id, nfseRun?.status]);
 
   useEffect(()=>{
     (async()=>{
@@ -657,48 +633,7 @@ const handleSubmit=async()=>{
   const nav=[{id:"dashboard",label:"Início",icon:"◎"},{id:"lancamentos",label:"Lançamentos",icon:"≡"},{id:"estatistica",label:"Dados Mensais",icon:"◑"},{id:"anual",label:"Dados Anuais",icon:"▦"},{id:"planejamentoPF",label:"Planejamento PF",icon:"R$"}];
 
   /* ══ RENDER ══════════════════════════════════════════════ */
-  const startNfseAutomation = async () => {
-    setNfseBusy(true); setNfseError(""); setNfseOtp("");
-    try {
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !sessionData?.session?.access_token) throw new Error("Sua sessão expirou. Entre novamente no aplicativo.");
-      const response = await fetch("/api/nfse/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionData.session.access_token}` },
-        body: JSON.stringify({ month, year }),
-      });
-      const body = await response.json();
-      if (!response.ok) {
-        if (body.run_id) throw new Error("Já existe uma emissão em andamento. Aguarde ou atualize o aplicativo.");
-        if (body.error === "AUTOMATION_NOT_CONFIGURED") throw new Error("A automação ainda precisa ser configurada no ambiente seguro.");
-        if (body.error === "NO_PENDING_INVOICES") throw new Error("Não há notas pendentes neste mês.");
-        throw new Error("Não foi possível iniciar a validação de acesso.");
-      }
-      setNfseRun(body.run);
-    } catch (error) {
-      setNfseError(error?.message || "Falha ao iniciar a automação.");
-    } finally { setNfseBusy(false); }
-  };
 
-  const submitNfseOtp = async () => {
-    if (!nfseRun?.id || !/^\d{6}$/.test(nfseOtp)) return;
-    setNfseBusy(true); setNfseError("");
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token;
-      if (!token) throw new Error("Sua sessão expirou. Entre novamente no aplicativo.");
-      const response = await fetch("/api/nfse/otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ runId: nfseRun.id, code: nfseOtp }),
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error === "RUN_NOT_WAITING_FOR_OTP" ? "A solicitação do código expirou. Inicie novamente." : "Não foi possível enviar o código.");
-      setNfseOtp("");
-      setNfseError("Código enviado. Aguardando validação da Contabilizei.");
-    } catch (error) { setNfseError(error?.message || "Falha ao enviar o código."); }
-    finally { setNfseBusy(false); }
-  };
 
   return (
     <div className="app-shell" style={{fontFamily:"Georgia,serif",background:C.bg,minHeight:"100vh",maxWidth:430,margin:"0 auto",position:"relative"}}>
@@ -1005,31 +940,9 @@ const handleSubmit=async()=>{
                 <p style={{margin:"8px 0 0",fontSize:11,color:C.muted}}>{MONTHS[month]} {year} · {cfg.lista.length} {cfg.lista.length===1?"nota":"notas"}</p>
               </div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
-                {notaModal==="pendentes" && cfg.lista.length>0 && (
-                  <button onClick={startNfseAutomation} disabled={nfseBusy || ['queued','authenticating','awaiting_otp','validating_access','preparing_draft'].includes(nfseRun?.status)}
-                    style={{background:C.orange||"#E67E22",color:"white",border:"none",borderRadius:12,padding:"10px 14px",fontSize:12,fontWeight:700,fontFamily:"inherit",cursor:nfseBusy?"wait":"pointer",whiteSpace:"nowrap",opacity:nfseBusy?0.65:1}}>
-                    {nfseBusy?"Aguarde…":"Emitir Nota"}
-                  </button>
-                )}
                 <CloseBtn onClick={()=>setNotaModal(null)}/>
               </div>
             </div>
-            {notaModal==="pendentes" && (nfseRun || nfseError) && (
-              <div style={{background:"#FFF8F0",border:"1px solid #F2D2B2",borderRadius:12,padding:12,marginBottom:12}}>
-                <p style={{margin:"0 0 6px",fontSize:13,fontWeight:700,color:C.text}}>Validação de acesso à Contabilizei</p>
-                {nfseRun && <p style={{margin:0,fontSize:12,color:C.muted}}>
-                  {nfseRun.status==="queued"?"Preparando acesso…":nfseRun.status==="authenticating"?"Acessando a Contabilizei…":nfseRun.status==="awaiting_otp"?"Informe o código de seis dígitos enviado ao seu e-mail.":nfseRun.status==="validating_access"?"Código recebido. Validando acesso…":nfseRun.status==="preparing_draft"?"Acessando a área de notas para verificar o formulário…":nfseRun.status==="preview_ready"?(nfseRun.result?.phase==="menu_diagnostic"?`Diagnóstico do menu concluído: ${nfseRun.result?.menu_candidate_count ?? 0} elemento(s) identificado(s). Nenhum dado foi preenchido e nenhuma nota foi emitida.`:nfseRun.result?.phase==="form_not_detected"?"Cliente localizado, mas o formulário não foi reconhecido. Nenhum dado foi preenchido e nenhuma nota foi emitida.":"Formulário localizado. Nenhum dado foi preenchido e nenhuma nota foi emitida."):nfseRun.status==="completed"?"Acesso validado. Esta etapa não emitiu nenhuma nota fiscal.":nfseRun.status==="failed"?"Não foi possível validar o acesso. Você pode iniciar novamente.":"Processo de autenticação."}
-                </p>}
-                {nfseRun?.status==="awaiting_otp" && (
-                  <div style={{display:"flex",gap:8,marginTop:10}}>
-                    <input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={nfseOtp} onChange={e=>setNfseOtp(e.target.value.replace(/\D/g,"").slice(0,6))} placeholder="Código de 6 dígitos" style={{...iSt,flex:1,minWidth:0,margin:0,background:"white"}} />
-                    <button onClick={submitNfseOtp} disabled={nfseBusy || nfseOtp.length!==6} style={{background:C.navy,color:"white",border:0,borderRadius:10,padding:"0 14px",fontWeight:700,opacity:nfseOtp.length!==6?0.5:1}}>Enviar</button>
-                  </div>
-                )}
-                {nfseError && <p style={{margin:"8px 0 0",fontSize:11,color:C.red}}>{nfseError}</p>}
-                {nfseRun?.status==="failed" && <button onClick={()=>setNfseRun(null)} style={{marginTop:8,background:"white",border:`1px solid ${C.border}`,borderRadius:8,padding:"7px 10px",color:C.navy}}>Fechar aviso</button>}
-              </div>
-            )}
             {cfg.lista.length===0
               ?<div style={{textAlign:"center",padding:"32px 0",color:"#CCC"}}>
                 <p style={{fontSize:36,margin:0}}>📄</p>
