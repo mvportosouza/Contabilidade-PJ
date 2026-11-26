@@ -2,26 +2,29 @@
 
 ## Lote 07 — Migration Governance / Production Reconciliation
 
-**Snapshot date:** 2026-09-01  
-**Supabase project:** `mvportosouza`  
-**Project ref:** `qthvrxnldlttvyspnesc`  
+**Snapshot date:** 2026-11-26  
+**Supabase project ref:** `qthvrxnldlttvyspnesc`  
 **Database:** PostgreSQL 17.6  
-**Baseline status:** production snapshot captured; repository and production migration histories reconciled without rewriting already-applied migrations.
+**Baseline status:** production migration history verified through the NFS-e cleanup migration; historical migration records preserved.
 
-> This document records the state observed in production. It does not claim that every historical production migration has an identical SQL file in the repository. Historical migrations that exist only in production are recorded as historical and must not be reconstructed from memory.
+> This document records observed production state. It does not claim every historical production migration has an identical SQL file in the repository. Never reconstruct historical migrations from memory or rename/rewrite migrations already applied.
 
 ---
 
 ## 1. Current production schema snapshot
 
-### Public tables
+### Public application tables
 
-| Table | RLS | Rows at snapshot | Primary key | Foreign key |
+| Table | RLS | Rows at last verified count | Primary key | Foreign key |
 |---|---|---:|---|---|
-| `public.app_state` | enabled | 2 | `user_id` | `user_id → auth.users(id)` |
-| `public.profiles` | enabled | 0 | `id` | `id → auth.users(id)` |
+| `public.app_state` | enabled | 3 | `user_id` | `user_id → auth.users(id)` |
+| `public.profiles` | enabled | not re-counted in this cleanup verification | `id` | `id → auth.users(id)` |
 
-### `public.app_state`
+The cleanup verification confirmed that the application tables remained present. The count of `app_state` was 3 at the time of that check. Do not infer row counts for any later date from this snapshot.
+
+The detailed column, index, RLS policy, grant and extension baseline below is retained from the 2026-09-01 schema audit. It was not re-enumerated as part of the 2026-11-26 cleanup, so treat those details as the last recorded baseline rather than a fresh re-audit.
+
+### `public.app_state` — last detailed snapshot 2026-09-01
 
 | Column | Type | Nullable | Default |
 |---|---|---|---|
@@ -30,11 +33,9 @@
 | `created_at` | timestamptz | no | `now()` |
 | `updated_at` | timestamptz | no | `now()` |
 
-Indexes:
-- `app_state_pkey` — unique btree on `user_id`
-- `app_state_updated_at_idx` — btree on `updated_at DESC`
+Indexes recorded: `app_state_pkey` (unique btree on `user_id`) and `app_state_updated_at_idx` (btree on `updated_at DESC`).
 
-### `public.profiles`
+### `public.profiles` — last detailed snapshot 2026-09-01
 
 | Column | Type | Nullable | Default |
 |---|---|---|---|
@@ -43,63 +44,55 @@ Indexes:
 | `created_at` | timestamptz | no | `now()` |
 | `updated_at` | timestamptz | no | `now()` |
 
-Indexes:
-- `profiles_pkey` — unique btree on `id`
+Index recorded: `profiles_pkey` (unique btree on `id`).
 
 ---
 
-## 2. Current RLS policies
+## 2. RLS policies — last detailed snapshot 2026-09-01
 
 ### `public.app_state`
-
 - `Users can view own app state` — SELECT — authenticated — `auth.uid() = user_id`
 - `Users can insert own app state` — INSERT — authenticated — `auth.uid() = user_id`
 - `Users can update own app state` — UPDATE — authenticated — `auth.uid() = user_id`, with matching `WITH CHECK`
 - `Users can delete own app state` — DELETE — authenticated — `auth.uid() = user_id`
 
 ### `public.profiles`
-
 - `Users can view own profile` — SELECT — authenticated — `auth.uid() = id`
 - `Users can insert own profile` — INSERT — authenticated — `auth.uid() = id`
 - `Users can update own profile` — UPDATE — authenticated — `auth.uid() = id`, with matching `WITH CHECK`
 
-RLS is enabled on both application tables.
+RLS was recorded enabled on both application tables in the prior baseline.
 
 ---
 
-## 3. Current functions / triggers relevant to the application schema
-
-Confirmed application/public functions:
+## 3. Functions / triggers relevant to application schema — last detailed snapshot 2026-09-01
 
 - `public.save_app_state(jsonb, timestamptz, boolean)` — `SECURITY INVOKER`; executable by `authenticated` and `service_role`, not `anon`.
 - `public.set_updated_at()` — trigger function.
 - `public.rls_auto_enable()` — event-trigger function; `SECURITY DEFINER`; executable by `service_role`/`postgres`.
 
-The current snapshot does not authorize changing these functions as part of Lote 07. They are recorded for reconciliation and future migration tracking.
+The following historical NFS-e function was removed by the cleanup migration described in Section 6:
+- `public.consume_nfse_otp(uuid)` — no longer exists in production after migration `20261126103509`.
 
 ---
 
-## 4. Current object grants
+## 4. Object grants — last detailed snapshot 2026-09-01
 
 ### `public.app_state`
-
 - `postgres`: full table privileges
 - `authenticated`: SELECT, INSERT, UPDATE, DELETE
 - `service_role`: full table privileges
 
 ### `public.profiles`
-
 - `postgres`: full table privileges
 - `authenticated`: SELECT, INSERT, UPDATE
 - `service_role`: full table privileges
 
-The application roles do not have the previously removed `TRUNCATE`, `TRIGGER`, or `REFERENCES` privileges on these application tables.
+The prior baseline recorded no `TRUNCATE`, `TRIGGER`, or `REFERENCES` privileges for application roles on these tables.
 
 ---
 
-## 5. Installed extensions
-
-Confirmed installed extensions:
+## 5. Installed extensions — last detailed snapshot 2026-09-01
 
 | Extension | Version | Schema |
 |---|---:|---|
@@ -109,74 +102,67 @@ Confirmed installed extensions:
 | `supabase_vault` | 0.3.1 | `vault` |
 | `uuid-ossp` | 1.1 | `extensions` |
 
-This ledger records installed extensions only; extensions merely available on the platform are not treated as part of the application baseline.
-
 ---
 
 ## 6. Production migration history vs repository
 
-The production migration history currently contains **14 applied entries**:
+The production migration history contains **18 applied entries**, verified on 2026-11-26:
 
-| Production version | Production migration name | Repository correspondence |
+| Production version | Production migration name | Repository correspondence / current status |
 |---|---|---|
 | `20260816175545` | `create_app_state_and_profiles` | historical — SQL file not present in current repository |
 | `20260816175554` | `harden_public_functions` | historical — SQL file not present in current repository |
 | `20260816175602` | `revoke_rls_helper_execute` | historical — SQL file not present in current repository |
 | `20260818161411` | `20260818_harden_app_state_rls_lote_a` | historical — SQL file not present in current repository |
 | `20260818173145` | `20260818_fix_save_app_state_rpc_lote_a` | historical — SQL file not present in current repository |
-| `20260819192927` | `20260819_harden_save_app_state_lote_i` | historical — SQL file not present in current repository |
+| `20260819192927` | `20260819_harden_save_app_state_rpc_lote_i` | historical — SQL file not present in current repository |
 | `20260820000510` | `20260819_200000_public_schema_baseline` | `supabase/migrations/20260819_200000_public_schema_baseline.sql` |
-| `20260821101438` | `lote_n_supabase_security_final_v2` | production history entry; repository has related security migration under a different filename/version |
-| `20260821140537` | `lote_q_least_privilege` | repository has `20260821_lote_q_least_privilege.sql`; production history timestamp differs from repository filename |
-| `20260822101358` | `20260822_lote_q1_least_privilege_final_v2` | repository has `20260822_lote_q1_least_privilege_final.sql`; production history timestamp differs from repository filename |
+| `20260821101438` | `lote_n_supabase_security_final_v2` | production history entry; related repository security migration has different filename/version |
+| `20260821140537` | `lote_q_least_privilege` | repository has `20260821_lote_q_least_privilege.sql`; production timestamp differs |
+| `20260822101358` | `20260822_lote_q1_least_privilege_final_v2` | repository has `20260822_lote_q1_least_privilege_final.sql`; production timestamp differs |
 | `20260827102052` | `reconcile_save_app_state_security` | `supabase/migrations/20260827102052_reconcile_save_app_state_security.sql` |
-| `20260827200228` | `phase_3_security_hardening` | repository has related migration under `20260827190000_phase_3_security_hardening.sql`; production timestamp differs |
-| `20260828004150` | `phase_3_edge_sdk_and_profiles_delete` | repository has related migration under `20260828000000_phase_3_edge_sdk_and_profiles_delete.sql`; production timestamp differs |
-| `20260830202840` | `lote_03_enforce_account_cascade` | repository has related migration under `20260830000000_lote_03_account_lifecycle.sql`; production timestamp/name differs |
+| `20260827200228` | `phase_3_security_hardening` | related repository file `20260827190000_phase_3_security_hardening.sql`; timestamp differs |
+| `20260828004150` | `phase_3_edge_sdk_and_profiles_delete` | related repository file `20260828000000_phase_3_edge_sdk_and_profiles_delete.sql`; timestamp differs |
+| `20260830202840` | `lote_03_enforce_account_cascade` | related repository file `20260830000000_lote_03_account_lifecycle.sql`; timestamp/name differs |
+| `20261119220623` | `nfse_automation_runs` | historical NFS-e automation migration; table subsequently removed by forward migration |
+| `20261119224301` | `nfse_consume_otp_atomic` | historical NFS-e OTP migration; function subsequently removed by forward migration |
+| `20261122142512` | `nfse_draft_preview_phase` | historical migration retained as provenance; old NFS-e automation discontinued |
+| `20261126103509` | `remove_nfse_automation_artifacts` | production-applied cleanup; matching SQL file: `supabase/migrations/20261126103509_remove_nfse_automation_artifacts.sql` |
 
-### Important reconciliation finding
+### Cleanup migration — important operational note
 
-There are two distinct forms of historical drift:
+The forward migration `20261126103509_remove_nfse_automation_artifacts` was already applied to production. Its SQL removes only:
+- `public.consume_nfse_otp(uuid)`
+- `public.nfse_automation_runs`
 
-1. **Production-only migrations:** the first six production entries have no corresponding SQL file in the current repository.
-2. **Timestamp/name drift:** several later migrations are represented in the repository by files whose timestamp and/or filename differs from the production migration-history entry.
+The SQL file included in this repository upload pack is provided solely to restore GitHub migration traceability. **Do not reapply it to production.** Historical migration rows `20261119220623`, `20261119224301` and `20261122142512` remain in Supabase's migration ledger intentionally; do not delete or rewrite them.
 
-These are **not** to be silently renamed or rewritten. Already-applied production migrations are immutable historical records.
+### Historical drift
 
-The repository therefore treats the current production state as the authoritative runtime state, while the ledger explicitly records the missing historical lineage.
+1. The first six production entries have no corresponding SQL file in the current repository.
+2. Several later entries have repository files with a different timestamp and/or filename.
 
----
-
-## 7. Baseline definition
-
-For Lote 07, the baseline is:
-
-**Production schema snapshot + production migration history + repository migration directory + security state captured above.**
-
-The baseline is considered established when:
-- all production tables are listed;
-- columns/defaults/constraints/indexes are recorded;
-- RLS and policies are recorded;
-- relevant functions/triggers are recorded;
-- effective grants are recorded;
-- installed extensions are recorded;
-- every production migration is classified as repository-backed, repository-related with filename/version drift, or production-only historical.
-
-No historical production migration is recreated merely to make filenames look sequential.
+These are immutable historical records. Do not rename or rewrite files/migration history to make them appear sequential. Use new forward migrations for future changes.
 
 ---
 
-## 8. Default privileges review
+## 7. Baseline and reconciliation rules
 
-The production database currently has explicit default ACL entries for several platform-managed roles/schemas.
+The baseline consists of production schema state, production migration history, repository migration directory and recorded security configuration. Where detailed schema properties are only available from the 2026-09-01 snapshot, that older observation is explicitly labeled; do not interpret it as a fresh 2026-11-26 re-audit.
 
-For the application `public` schema:
-- defaults owned by `postgres` grant table privileges to `postgres` and `service_role`, while function defaults grant execution to `postgres` and `service_role`;
-- separate defaults owned by `supabase_admin` remain broader and include `anon`, `authenticated`, and `service_role`.
+The production cleanup verification confirmed that `public.nfse_automation_runs` and `public.consume_nfse_otp(uuid)` no longer exist. `public.app_state` remained present with 3 rows at the time of verification; `public.profiles` remained present. The Edge Function `delete-account` remained ACTIVE (version 9, `verify_jwt=true`).
 
-**Decision for Lote 07:** observe and document these defaults; do not attempt blanket `ALTER DEFAULT PRIVILEGES` changes against platform-managed ownership where the current role/plan may not permit or where doing so could affect Supabase-managed objects.
+Security advisor: one warning remains for Leaked Password Protection in Supabase Auth. Performance advisor: no findings. Health advisor: no findings. No changes to these settings were made by the NFS-e cleanup.
 
-Future application migrations must explicitly define the intended grants and RLS state for newly exposed objects.
+---
+
+## 8. Default privileges review — last detailed snapshot 2026-09-01
+
+For the application `public` schema, the prior audit recorded:
+- defaults owned by `postgres` grant table privileges to `postgres` and `service_role`; function defaults grant execution to `postgres` and `service_role`;
+- separate defaults owned by `supabase_admin` remain broader and include `anon`, `authenticated` and `service_role`.
+
+Decision: document these platform-managed defaults; do not make blanket `ALTER DEFAULT PRIVILEGES` changes without a separate review of ownership and impact.
 
 ---
 
@@ -198,20 +184,15 @@ Already-applied migrations must not be edited retroactively. Corrections are imp
 
 ## 10. Relationship between GitHub and Supabase
 
-GitHub is the versioned source of migration intent.
-
-Supabase production is the runtime database.
-
-The migration ledger is the reconciliation layer connecting the two.
-
-For every future change, the repository migration and the resulting production migration-history entry must be traceable to the same change.
+GitHub is the versioned source of migration intent. Supabase production is the runtime database. This ledger is the reconciliation layer connecting the two. For every future change, the repository migration and resulting production migration-history entry must be traceable to the same change.
 
 ---
 
 ## 11. Verification notes
 
-Security advisor: one existing warning was reported for **Leaked Password Protection** in Supabase Auth. No new schema change was made to address it in Lote 07.
+- Migration count: 18 applied entries, verified 2026-11-26.
+- NFS-e cleanup: table and OTP function absent after forward migration.
+- `delete-account`: Edge Function ACTIVE, version 9, `verify_jwt=true`.
+- Supabase advisor: one existing Auth warning for Leaked Password Protection; no performance or health findings.
+- No changes to application financial records or user authentication data were made as part of the cleanup.
 
-Performance advisor: no findings.
-
-No database DDL was executed as part of this governance snapshot.
